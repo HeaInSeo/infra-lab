@@ -198,3 +198,4 @@ This repo references the earlier project but does not inherit its service-orient
 - Cilium is intentionally deferred as a future profile or optional path, not forced into the baseline.
 - The guest baseline uses Ubuntu 24.04 because the public Multipass image catalog is Ubuntu-first in the current environment.
 - Host helper scripts are still oriented around the existing Rocky 8 workstation setup flow.
+- The earlier Rocky 8 based path may also hit the same class of control-plane instability seen during this sprint. If static pods churn or the API server becomes unstable, check runtime alignment first: `containerd --version`, `systemctl show -p ExecStart containerd`, `/etc/containerd/config.toml`, `crictl info`, and kubelet `cgroupDriver`, before changing `etcd` or `kube-apiserver` manifests.
