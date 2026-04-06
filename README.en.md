@@ -202,3 +202,4 @@ This repo references the earlier project but does not inherit its service-orient
 - The guest baseline uses Ubuntu 24.04 because the public Multipass image catalog is Ubuntu-first in the current environment.
 - Host helper scripts are still oriented around the existing Rocky 8 workstation setup flow.
 - The earlier Rocky 8 based path may also hit the same class of control-plane instability seen during this sprint. If static pods churn or the API server becomes unstable, check runtime alignment first: `containerd --version`, `systemctl show -p ExecStart containerd`, `/etc/containerd/config.toml`, `crictl info`, and kubelet `cgroupDriver`, before changing `etcd` or `kube-apiserver` manifests.
+- A Korean troubleshooting timeline based on the actual incident history is available at [docs/TROUBLESHOOTING_HISTORY.ko.md](docs/TROUBLESHOOTING_HISTORY.ko.md).
