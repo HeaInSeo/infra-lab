@@ -1,152 +1,155 @@
 # multipass-k8s-lab
 
-`multipass-k8s-lab` is a reusable VM-based Kubernetes lab baseline for local and workstation-grade PoC work. The current baseline is intentionally narrow: Multipass + Ubuntu 24.04 guests + OpenTofu + kubeadm, with a repeatable 3-node cluster flow and a small set of infrastructure add-ons.
+한국어: [README.md](/opt/go/src/github.com/HeaInSeo/multipass-k8s-lab/README.md)
+English: [README.en.md](/opt/go/src/github.com/HeaInSeo/multipass-k8s-lab/README.en.md)
 
-This repository is not a single-project environment. It is a shared lab infrastructure base for future Kubernetes experiments such as node-local artifact and storage flows, DaemonSet-style node agents, same-node reuse versus cross-node fetch behavior, Cilium and networking work, storage tests, operator validation, and other cluster-level PoCs.
+`multipass-k8s-lab`은 로컬 및 워크스테이션급 PoC 작업을 위한 재사용 가능한 VM 기반 Kubernetes 랩 베이스라인입니다. 현재 베이스라인은 의도적으로 범위를 좁게 유지합니다. Multipass + Ubuntu 24.04 게스트 + OpenTofu + kubeadm 조합을 사용하며, 반복 가능한 3노드 클러스터 구성과 소수의 인프라 애드온만 포함합니다.
 
-## Identity
+이 저장소는 단일 프로젝트용 환경이 아닙니다. node-local artifact 및 스토리지 흐름, DaemonSet 스타일 노드 에이전트, same-node 재사용과 cross-node fetch 비교, Cilium 및 네트워킹 실험, 스토리지 테스트, 오퍼레이터 검증 등 앞으로의 다양한 Kubernetes 실험을 위한 공용 랩 인프라 기반입니다.
 
-- Purpose: general-purpose K8s VM lab infrastructure
-- Current baseline: Ubuntu 24.04 guests + Multipass + OpenTofu + kubeadm
-- First target shape: 3 VMs, `1 control-plane + 2 workers`
-- Lifecycle support: host setup, cluster up/down, status, local clean
-- Add-on model: `base` and `optional`
-- Future extension point: `profiles/` for project-specific overlays without turning this repo into a workload repo
+## 정체성
 
-## What This Repo Owns
+- 목적: 범용 K8s VM 랩 인프라
+- 현재 베이스라인: Ubuntu 24.04 게스트 + Multipass + OpenTofu + kubeadm
+- 첫 번째 목표 형태: `1 control-plane + 2 workers`인 3 VM
+- 라이프사이클 지원: 호스트 준비, 클러스터 up/down, 상태 확인, 로컬 정리
+- 애드온 모델: `base`와 `optional`
+- 향후 확장 지점: 이 저장소를 워크로드 저장소로 바꾸지 않으면서 `profiles/`를 통한 프로젝트별 오버레이 지원
 
-- Multipass VM lifecycle for a kubeadm-based lab cluster
-- Baseline cluster bootstrap and kubeconfig export
-- Small operational scripts for repeatable local lab usage
-- A minimal add-on layer for cluster infrastructure capabilities
-- Documentation for scope, entrypoints, and baseline operating model
+## 이 저장소가 담당하는 것
 
-## What This Repo Does Not Own
+- kubeadm 기반 랩 클러스터를 위한 Multipass VM 라이프사이클
+- 베이스라인 클러스터 부트스트랩과 kubeconfig 내보내기
+- 반복 가능한 로컬 랩 사용을 위한 소규모 운영 스크립트
+- 클러스터 인프라 기능을 위한 최소 애드온 계층
+- 범위, 진입점, 베이스라인 운영 모델에 대한 문서
 
-- Application deployment for a specific project
-- Artifact-agent, catalog, storage app, or Cilium implementation itself
-- Production cluster provisioning or production hardening
-- Deeply embedded project-specific workloads in the main repo
+## 이 저장소가 담당하지 않는 것
 
-More detail: [docs/LAB_SCOPE.md](/opt/go/src/github.com/HeaInSeo/multipass-k8s-lab/docs/LAB_SCOPE.md)
+- 특정 프로젝트의 애플리케이션 배포
+- artifact-agent, catalog, storage app, Cilium 자체 구현
+- 프로덕션 클러스터 프로비저닝 또는 프로덕션 수준 하드닝
+- 메인 저장소에 깊게 결합된 프로젝트 전용 워크로드
 
-## Quick Start
+자세한 내용: [docs/LAB_SCOPE.ko.md](/opt/go/src/github.com/HeaInSeo/multipass-k8s-lab/docs/LAB_SCOPE.ko.md)
 
-1. Prepare the host:
+## 빠른 시작
+
+1. 호스트를 준비합니다.
 
 ```bash
 ./scripts/k8s-tool.sh host-setup
 ```
 
-2. Review defaults:
+2. 기본값을 확인합니다.
 
 ```bash
 sed -n '1,200p' dev.auto.tfvars
 ```
 
-3. Create the baseline cluster:
+3. 베이스라인 클러스터를 생성합니다.
 
 ```bash
 ./scripts/k8s-tool.sh up
 ```
 
-4. Check status:
+4. 상태를 확인합니다.
 
 ```bash
 ./scripts/k8s-tool.sh status
 ```
 
-5. Install base add-ons:
+5. base 애드온을 설치합니다.
 
 ```bash
 ./scripts/k8s-tool.sh addons-install base
 ./scripts/k8s-tool.sh addons-verify
 ```
 
-6. Tear down:
+6. 종료합니다.
 
 ```bash
 ./scripts/k8s-tool.sh down
 ```
 
-7. Remove local state:
+7. 로컬 상태 파일을 제거합니다.
 
 ```bash
 FORCE=1 ./scripts/k8s-tool.sh clean
 ```
 
-## Baseline Execution Path
+## 베이스라인 실행 흐름
 
-### Host setup
+### 호스트 설정
 
 ```bash
 ./scripts/k8s-tool.sh host-setup
 ```
 
-Installs or verifies:
+설치하거나 확인하는 항목:
 
 - OpenTofu
 - Multipass
 - Python 3
-- optional `kubectl`
-- optional `helm`
+- 선택 항목인 `kubectl`
+- 선택 항목인 `helm`
 
-### Cluster up
+### 클러스터 생성
 
 ```bash
 ./scripts/k8s-tool.sh up
 ```
 
-What happens:
+수행 내용:
 
-- OpenTofu initializes and applies local resources
-- Multipass launches Ubuntu 24.04 VMs
-- `kubeadm init` runs on the first control-plane node
-- worker nodes join
-- local `./kubeconfig` is exported
+- OpenTofu 초기화 및 로컬 리소스 적용
+- Multipass로 Ubuntu 24.04 VM 실행
+- 첫 control-plane 노드에서 `kubeadm init` 실행
+- worker 노드 조인
+- 로컬 `./kubeconfig` 내보내기
 
-### Status
+### 상태 확인
 
 ```bash
 ./scripts/k8s-tool.sh status
 ```
 
-If `./kubeconfig` exists and `kubectl` is present, node and pod status is shown. Otherwise the command falls back to `multipass list`.
+`./kubeconfig`가 존재하고 `kubectl`이 있으면 노드 및 파드 상태를 출력합니다. 그렇지 않으면 `multipass list`로 폴백합니다.
 
-### Down
+### 종료
 
 ```bash
 ./scripts/k8s-tool.sh down
 ```
 
-Destroys VMs and related local OpenTofu-managed resources.
+VM과 OpenTofu가 관리하는 관련 로컬 리소스를 제거합니다.
 
-### Clean
+### 정리
 
 ```bash
 FORCE=1 ./scripts/k8s-tool.sh clean
 ```
 
-Removes local state files such as `.terraform/`, `*.tfstate`, and `./kubeconfig`. It does not remove host packages.
+`.terraform/`, `*.tfstate`, `./kubeconfig` 같은 로컬 상태 파일을 제거합니다. 호스트 패키지는 제거하지 않습니다.
 
-## Add-ons
+## 애드온
 
-The repo separates infrastructure add-ons into two categories.
+이 저장소는 인프라 애드온을 두 범주로 구분합니다.
 
 ### Base
 
-Base add-ons are reasonable defaults for a lab cluster and do not make the repository specific to one PoC.
+Base 애드온은 랩 클러스터의 합리적인 기본값이며 특정 PoC에 저장소를 종속시키지 않습니다.
 
 - `metrics-server`
 
 ### Optional
 
-Optional add-ons are useful for certain lab shapes, but should be explicit rather than always on.
+Optional 애드온은 특정 랩 형태에서 유용하지만 항상 켜 두기보다는 명시적으로 설치해야 하는 항목입니다.
 
 - `local-path-storage`
 - `metallb`
 
-Examples:
+예시:
 
 ```bash
 ./scripts/k8s-tool.sh addons-install base
@@ -155,9 +158,9 @@ Examples:
 ./scripts/k8s-tool.sh addons-verify
 ```
 
-`metallb` requires review of [addons/values/metallb/ipaddresspool.yaml](/opt/go/src/github.com/HeaInSeo/multipass-k8s-lab/addons/values/metallb/ipaddresspool.yaml) before use.
+`metallb`를 사용하기 전에 [addons/values/metallb/ipaddresspool.yaml](/opt/go/src/github.com/HeaInSeo/multipass-k8s-lab/addons/values/metallb/ipaddresspool.yaml)을 검토해야 합니다.
 
-## Directory Layout
+## 디렉터리 구성
 
 ```text
 .
@@ -180,22 +183,22 @@ Examples:
 └── dev.auto.tfvars
 ```
 
-## Why This Looks Different From `mac-k8s-multipass-terraform`
+## `mac-k8s-multipass-terraform`과 다른 이유
 
-This repo references the earlier project but does not inherit its service-oriented scope. The old repository mixed cluster baseline work with service install traces and broader stack add-ons. This repository keeps the VM and kubeadm lifecycle pattern, then narrows the responsibility back to reusable lab infrastructure.
+이 저장소는 이전 프로젝트를 참고하지만 서비스 지향 범위를 그대로 가져오지는 않습니다. 기존 저장소는 클러스터 베이스라인 작업과 서비스 설치 흔적, 더 넓은 스택 애드온이 섞여 있었습니다. 이 저장소는 VM과 kubeadm 라이프사이클 패턴은 유지하면서도 책임 범위를 재사용 가능한 랩 인프라로 다시 좁혔습니다.
 
-## Future Direction
+## 향후 방향
 
-- Cilium as an alternative networking profile
-- local storage and local PV experiment helpers
-- node-local agent experiment helpers
-- operator validation profiles
-- project overlays under `profiles/` or a future `labs/` convention
+- 대체 네트워킹 프로필로서 Cilium
+- 로컬 스토리지 및 local PV 실험용 헬퍼
+- node-local agent 실험용 헬퍼
+- operator 검증 프로필
+- `profiles/` 또는 향후 `labs/` 규칙 아래의 프로젝트 오버레이
 
-## Notes
+## 참고
 
-- The default CNI in the first baseline is Flannel for simplicity and quick bootstrap.
-- Cilium is intentionally deferred as a future profile or optional path, not forced into the baseline.
-- The guest baseline uses Ubuntu 24.04 because the public Multipass image catalog is Ubuntu-first in the current environment.
-- Host helper scripts are still oriented around the existing Rocky 8 workstation setup flow.
-- The earlier Rocky 8 based path may also hit the same class of control-plane instability seen during this sprint. If static pods churn or the API server becomes unstable, check runtime alignment first: `containerd --version`, `systemctl show -p ExecStart containerd`, `/etc/containerd/config.toml`, `crictl info`, and kubelet `cgroupDriver`, before changing `etcd` or `kube-apiserver` manifests.
+- 첫 번째 베이스라인에서는 빠른 부트스트랩을 위해 기본 CNI로 Flannel을 사용합니다.
+- Cilium은 의도적으로 향후 프로필 또는 선택적 경로로 미뤘으며, 베이스라인에 강제로 포함하지 않습니다.
+- 현재 환경에서 공개 Multipass 이미지 카탈로그가 Ubuntu 중심이기 때문에 게스트 베이스라인은 Ubuntu 24.04를 사용합니다.
+- 호스트 헬퍼 스크립트는 여전히 기존 Rocky 8 워크스테이션 설정 흐름을 기준으로 하고 있습니다.
+- 이전 Rocky 8 경로도 이번 스프린트에서 봤던 것과 같은 종류의 control-plane 불안정을 겪을 수 있습니다. static pod가 반복 재생성되거나 API server가 불안정하면 `etcd`나 `kube-apiserver` 매니페스트를 먼저 바꾸기 전에 `containerd --version`, `systemctl show -p ExecStart containerd`, `/etc/containerd/config.toml`, `crictl info`, kubelet `cgroupDriver`를 확인하십시오.
