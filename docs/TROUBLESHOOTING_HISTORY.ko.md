@@ -157,3 +157,39 @@ sudo chmod +x ${VM_HOME}/join.sh && sudo bash ${VM_HOME}/join.sh
 - `crictl info` 의 단일 필드만 보고 수정하지 말고 runtime 옵션과 CRI plugin 생존 여부를 같이 봐야 합니다.
 - control plane static pod 문제를 보더라도 manifest 수정은 마지막 단계여야 합니다.
 - 상위 워크로드 PoC 결과를 해석할 때는 항상 인프라 준비 상태와 분리해서 봐야 합니다.
+
+## 9. 2026-04-06 ~ 2026-04-08: 하위 PoC 재검증에서 확인한 책임 경계
+
+`artifact-handoff-poc`의 same-node / cross-node / failure scenario 재검증을 다시 돌리면서, 이번 저장소 쪽에 남겨야 할 교훈도 하나 더 분명해졌습니다.
+
+핵심은 "하위 PoC 실행이 실패했다"는 사실만으로 `multipass-k8s-lab` 회귀라고 보면 안 된다는 점입니다.
+
+이번 재검증에서 실제로 먼저 확인한 것은 다음이었습니다.
+
+1. `./scripts/k8s-tool.sh status`
+2. `kubectl get nodes -o wide`
+3. `artifact-handoff` 네임스페이스 Pod 상태
+
+이 확인에서는 다음이 계속 성립했습니다.
+
+- `lab-master-0`
+- `lab-worker-0`
+- `lab-worker-1`
+
+세 노드가 모두 `Ready`였고, control plane endpoint 도 정상 응답했습니다. 즉 `multipass-k8s-lab` 자체는 이번 재검증 시점에 다시 깨진 것이 아니었습니다.
+
+반대로, 하위 PoC 쪽에서 실제로 드러난 문제는 아래와 같았습니다.
+
+- host `python3`가 3.6 계열이라 helper script 의 `text=True` 사용이 깨짐
+- 이전 artifact cache 와 old pod process 영향으로 첫 cross-node 재실행이 `source=local`로 관찰됨
+- sandbox 환경에서는 API server 접근이 `socket: operation not permitted`로 차단될 수 있었음
+
+이 세 가지는 모두 `multipass-k8s-lab`의 VM bring-up, kubeadm bootstrap, worker join, containerd baseline 문제와는 다른 축이었습니다.
+
+정리하면:
+
+- 3-node `Ready` 상태가 유지되고 있다면, 먼저 workload repo 의 script / cache / pod lifecycle 문제를 의심하는 것이 맞습니다.
+- sandbox 의 네트워크 제약으로 `kubectl` 이 막히는 경우도 랩 회귀가 아니라 호출 환경 문제일 수 있습니다.
+- `multipass-k8s-lab` 쪽 트러블슈팅은 VM lifecycle, kubeadm/bootstrap, CNI, runtime 정렬 문제를 다루고, workload-specific validation 문제는 상위 PoC 저장소 문서로 보내는 것이 책임 경계를 유지하는 방법입니다.
+
+이번 메모를 남기는 이유는, 이후에도 "실험이 실패했다"는 현상만 보고 인프라 저장소와 PoC 저장소의 책임을 섞지 않기 위해서입니다.
