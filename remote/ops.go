@@ -12,7 +12,7 @@ func (c *Client) ClusterNodes() (string, error) {
 
 // CiliumStatus prints the Cilium status from lab-master-0.
 func (c *Client) CiliumStatus() (string, error) {
-	return c.MultipassExec("lab-master-0", "cilium status 2>&1")
+	return c.MultipassExec(remoteMasterName(), "cilium status 2>&1")
 }
 
 // InstallCiliumCLI installs the Cilium CLI on lab-master-0.
@@ -25,7 +25,7 @@ func (c *Client) InstallCiliumCLI() error {
 		`rm /tmp/cilium-linux-amd64.tar.gz`,
 		`cilium version --client`,
 	}, " && ")
-	out, err := c.MultipassExec("lab-master-0", script)
+	out, err := c.MultipassExec(remoteMasterName(), script)
 	if err != nil {
 		return fmt.Errorf("install cilium cli: %w", err)
 	}

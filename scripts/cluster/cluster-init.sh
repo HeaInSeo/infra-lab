@@ -34,6 +34,6 @@ echo "sudo ${JOIN_CMD}" | sudo tee "${VM_HOME}/join.sh" >/dev/null
 sudo chmod +x "${VM_HOME}/join.sh"
 
 CERT_KEY="$(sudo kubeadm init phase upload-certs --upload-certs | tail -n 1)"
-JOIN_CP_CMD="$(sudo kubeadm token create --print-join-command --certificate-key "${CERT_KEY}")"
+JOIN_CP_CMD="${JOIN_CMD} --control-plane --certificate-key ${CERT_KEY}"
 echo "sudo ${JOIN_CP_CMD}" | sudo tee "${VM_HOME}/join-controlplane.sh" >/dev/null
 sudo chmod +x "${VM_HOME}/join-controlplane.sh"

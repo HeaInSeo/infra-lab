@@ -1,4 +1,4 @@
-module github.com/HeaInSeo/multipass-k8s-lab/remote
+module github.com/HeaInSeo/infra-lab/remote
 
 go 1.25.0
 

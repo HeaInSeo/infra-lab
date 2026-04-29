@@ -14,10 +14,20 @@ import (
 )
 
 const (
-	DefaultHost = "100.123.80.48"
-	DefaultUser = "seoy"
-	DefaultPort = "22"
+	DefaultHost          = "100.123.80.48"
+	DefaultUser          = "seoy"
+	DefaultPort          = "22"
+	DefaultClusterPrefix = "lab"
+	DefaultRepoPath      = "/opt/go/src/github.com/HeaInSeo/infra-lab"
 )
+
+func envOrDefault(key, fallback string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
 
 // Client wraps an SSH connection to the remote lab machine.
 type Client struct {
@@ -35,20 +45,23 @@ type Config struct {
 // DefaultConfig returns connection config from environment variables,
 // falling back to the seoy lab machine defaults.
 func DefaultConfig() Config {
-	host := os.Getenv("REMOTE_HOST")
-	if host == "" {
-		host = DefaultHost
-	}
-	user := os.Getenv("REMOTE_USER")
-	if user == "" {
-		user = DefaultUser
-	}
+	host := envOrDefault("REMOTE_HOST", DefaultHost)
+	user := envOrDefault("REMOTE_USER", DefaultUser)
 	pass := os.Getenv("REMOTE_PASS")
-	port := os.Getenv("REMOTE_PORT")
-	if port == "" {
-		port = DefaultPort
-	}
+	port := envOrDefault("REMOTE_PORT", DefaultPort)
 	return Config{Host: host, Port: port, User: user, Password: pass}
+}
+
+func remoteNamePrefix() string {
+	return envOrDefault("REMOTE_NAME_PREFIX", DefaultClusterPrefix)
+}
+
+func remoteRepoPath() string {
+	return envOrDefault("REMOTE_REPO_PATH", DefaultRepoPath)
+}
+
+func remoteMasterName() string {
+	return remoteNamePrefix() + "-master-0"
 }
 
 // Dial opens an SSH connection using the given Config.
@@ -116,8 +129,8 @@ func (c *Client) MultipassList() (string, error) {
 }
 
 // KubectlOnMaster runs a kubectl command on lab-master-0 using the exported kubeconfig.
-// kubeconfig is assumed to be at the default multipass-k8s-lab path on the remote machine.
+// kubeconfig is assumed to be at the default infra-lab path on the remote machine.
 func (c *Client) KubectlOnMaster(args string) (string, error) {
-	kubeconfig := "KUBECONFIG=/opt/go/src/github.com/HeaInSeo/multipass-k8s-lab/kubeconfig"
+	kubeconfig := "KUBECONFIG=" + remoteRepoPath() + "/kubeconfig"
 	return c.Run(fmt.Sprintf("%s kubectl %s", kubeconfig, args))
 }

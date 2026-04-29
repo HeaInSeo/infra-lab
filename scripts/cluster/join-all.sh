@@ -37,7 +37,7 @@ if [[ "${MASTERS}" -gt 1 ]]; then
       if [[ -f /etc/kubernetes/kubelet.conf ]]; then \
         echo '[INFO] already joined; skip'; \
       else \
-        chmod +x ${VM_HOME}/join-controlplane.sh && sudo bash ${VM_HOME}/join-controlplane.sh; \
+        sudo chmod +x ${VM_HOME}/join-controlplane.sh && sudo bash ${VM_HOME}/join-controlplane.sh; \
       fi"
   done
 fi

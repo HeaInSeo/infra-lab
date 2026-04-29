@@ -1,9 +1,9 @@
-# multipass-k8s-lab
+# infra-lab
 
 English: [README.en.md](README.en.md)
 한국어: [README.md](README.md)
 
-`multipass-k8s-lab` is a reusable VM-based Kubernetes lab baseline for local and workstation-grade PoC work. The current baseline is intentionally narrow: Multipass + Ubuntu 24.04 guests + OpenTofu + kubeadm, with a repeatable 3-node cluster flow and a small set of infrastructure add-ons.
+`infra-lab` is a reusable VM-based Kubernetes lab baseline for local and workstation-grade PoC work. The current baseline is intentionally narrow: Multipass + Ubuntu 24.04 guests + OpenTofu + kubeadm, with a repeatable 3-node cluster flow and a small set of infrastructure add-ons.
 
 This repository is not a single-project environment. It is a shared lab infrastructure base for future Kubernetes experiments such as node-local artifact and storage flows, DaemonSet-style node agents, same-node reuse versus cross-node fetch behavior, Cilium and networking work, storage tests, operator validation, and other cluster-level PoCs.
 
@@ -53,6 +53,8 @@ sed -n '1,200p' dev.auto.tfvars
 ./scripts/k8s-tool.sh up
 ```
 
+If you change `name_prefix`, `masters`, `workers`, `vm_user`, or VM sizing in `dev.auto.tfvars`, rerunning `up` reapplies the OpenTofu plan against that updated shape.
+
 4. Check status:
 
 ```bash
@@ -65,6 +67,8 @@ sed -n '1,200p' dev.auto.tfvars
 ./scripts/k8s-tool.sh addons-install base
 ./scripts/k8s-tool.sh addons-verify
 ```
+
+`addons-verify` checks the base add-ons plus any optional add-ons that are currently installed. To target one add-on explicitly, use a scoped command such as `./scripts/k8s-tool.sh addons-verify optional cilium`.
 
 6. Tear down:
 
@@ -93,6 +97,8 @@ Installs or verifies:
 - Python 3
 - optional `kubectl`
 - optional `helm`
+
+`host-setup` currently supports Rocky/RHEL-family hosts only.
 
 ### Cluster up
 
@@ -156,6 +162,7 @@ Examples:
 ./scripts/k8s-tool.sh addons-install optional local-path-storage
 ./scripts/k8s-tool.sh addons-install optional metallb
 ./scripts/k8s-tool.sh addons-verify
+./scripts/k8s-tool.sh addons-verify optional metallb
 ```
 
 `metallb` requires review of [addons/values/metallb/ipaddresspool.yaml](addons/values/metallb/ipaddresspool.yaml) before use.

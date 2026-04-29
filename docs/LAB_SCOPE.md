@@ -2,7 +2,7 @@
 
 ## Summary
 
-`multipass-k8s-lab` is a general-purpose Kubernetes VM lab baseline. Its job is to make it easy to create, destroy, inspect, and lightly extend a repeatable kubeadm cluster on Multipass-backed Ubuntu 24.04 virtual machines.
+`infra-lab` is a general-purpose Kubernetes VM lab baseline. Its job is to make it easy to create, destroy, inspect, and lightly extend a repeatable kubeadm cluster on Multipass-backed Ubuntu 24.04 virtual machines.
 
 The repository exists to support many future K8s PoCs, not to encode one PoC's workload or business logic.
 

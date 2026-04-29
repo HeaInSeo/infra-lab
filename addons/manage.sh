@@ -11,13 +11,15 @@ usage() {
 Usage:
   addons/manage.sh install <base|optional> [name]
   addons/manage.sh uninstall <base|optional> [name]
-  addons/manage.sh verify
+  addons/manage.sh verify [base|optional] [name]
 
 Examples:
   addons/manage.sh install base
   addons/manage.sh install optional local-path-storage
   addons/manage.sh install optional metallb
   addons/manage.sh install optional cilium
+  addons/manage.sh verify
+  addons/manage.sh verify optional cilium
 USAGE
 }
 
@@ -77,9 +79,48 @@ uninstall_optional() {
 }
 
 verify_optional() {
-  bash "${ROOT_DIR}/addons/optional/local-path-storage/verify.sh"
-  bash "${ROOT_DIR}/addons/optional/metallb/verify.sh"
-  bash "${ROOT_DIR}/addons/optional/cilium/verify.sh"
+  case "$1" in
+    local-path-storage)
+      bash "${ROOT_DIR}/addons/optional/local-path-storage/verify.sh"
+      ;;
+    metallb)
+      bash "${ROOT_DIR}/addons/optional/metallb/verify.sh"
+      ;;
+    cilium)
+      bash "${ROOT_DIR}/addons/optional/cilium/verify.sh"
+      ;;
+    *)
+      echo "unknown optional addon: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+is_installed() {
+  case "$1" in
+    local-path-storage)
+      kubectl -n local-path-storage get deployment local-path-provisioner >/dev/null 2>&1
+      ;;
+    metallb)
+      kubectl -n metallb-system get deployment controller >/dev/null 2>&1
+      ;;
+    cilium)
+      kubectl -n kube-system get ds cilium >/dev/null 2>&1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+verify_installed() {
+  verify_base
+
+  for addon in local-path-storage metallb cilium; do
+    if is_installed "$addon"; then
+      verify_optional "$addon"
+    fi
+  done
 }
 
 case "$ACTION" in
@@ -109,8 +150,17 @@ case "$ACTION" in
     ;;
   verify)
     need_cmd kubectl
-    verify_base
-    verify_optional
+    if [[ -z "$SCOPE" ]]; then
+      verify_installed
+    elif [[ "$SCOPE" == "base" ]]; then
+      verify_base
+    elif [[ "$SCOPE" == "optional" ]]; then
+      [[ -n "$NAME" ]] || { echo "optional addon name required" >&2; exit 1; }
+      verify_optional "$NAME"
+    else
+      usage
+      exit 1
+    fi
     ;;
   *)
     usage

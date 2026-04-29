@@ -1,6 +1,6 @@
 # TROUBLESHOOTING_HISTORY
 
-This document records the actual problems encountered while bringing up `multipass-k8s-lab`, organized as a learning-oriented troubleshooting history based on Git history and real incident flow.
+This document records the actual problems encountered while bringing up `infra-lab`, organized as a learning-oriented troubleshooting history based on Git history and real incident flow.
 
 Its core goals are:
 
@@ -164,7 +164,7 @@ So this troubleshooting history is not only an infra memo. It directly shaped wh
 
 While rerunning same-node / cross-node / failure scenarios in `artifact-handoff-poc`, one more lesson became worth preserving in this repository.
 
-The key point is that "the lower-layer PoC run failed" does not automatically mean `multipass-k8s-lab` regressed.
+The key point is that "the lower-layer PoC run failed" does not automatically mean `infra-lab` regressed.
 
 During that revalidation window, the first things checked were:
 
@@ -178,7 +178,7 @@ Those checks continued to show:
 - `lab-worker-0`
 - `lab-worker-1`
 
-All three nodes remained `Ready`, and the control-plane endpoint answered normally. So `multipass-k8s-lab` itself had not broken again at that time.
+All three nodes remained `Ready`, and the control-plane endpoint answered normally. So `infra-lab` itself had not broken again at that time.
 
 Instead, the actual issues found in the upper-layer PoC were:
 
@@ -186,12 +186,12 @@ Instead, the actual issues found in the upper-layer PoC were:
 - old artifact cache and old pod processes made the first cross-node rerun appear as `source=local`
 - sandbox access could block API-server calls with `socket: operation not permitted`
 
-All three are different from `multipass-k8s-lab` VM bring-up, kubeadm bootstrap, worker join, or containerd-baseline issues.
+All three are different from `infra-lab` VM bring-up, kubeadm bootstrap, worker join, or containerd-baseline issues.
 
 So the practical reading is:
 
 - if the 3-node `Ready` state still holds, suspect the workload repo's scripts, cache, or pod lifecycle first
 - if sandbox networking blocks `kubectl`, that may be an execution-environment issue rather than a lab regression
-- troubleshooting in `multipass-k8s-lab` should stay focused on VM lifecycle, kubeadm/bootstrap, CNI, and runtime alignment, while workload-specific validation issues should be documented in the upper-layer PoC repository
+- troubleshooting in `infra-lab` should stay focused on VM lifecycle, kubeadm/bootstrap, CNI, and runtime alignment, while workload-specific validation issues should be documented in the upper-layer PoC repository
 
 This note exists so future failures are not immediately interpreted by mixing infrastructure and workload responsibilities.

@@ -12,6 +12,11 @@ require_linux() {
   # shellcheck disable=SC1091
   . /etc/os-release
   ok "Detected OS: ${PRETTY_NAME:-unknown}"
+
+  local family="${ID_LIKE:-} ${ID:-}"
+  if [[ ! "${family}" =~ (rhel|fedora|rocky|centos|almalinux) ]]; then
+    die "host-setup currently supports Rocky/RHEL-family hosts only."
+  fi
 }
 
 ensure_dnf_basics() {

@@ -10,7 +10,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/HeaInSeo/multipass-k8s-lab/remote"
+	"github.com/HeaInSeo/infra-lab/remote"
 )
 
 func main() {

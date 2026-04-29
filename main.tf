@@ -73,6 +73,7 @@ resource "null_resource" "init_cluster" {
     name_prefix  = var.name_prefix
     masters      = tostring(var.masters)
     master0_name = "${var.name_prefix}-master-0"
+    vm_user      = var.vm_user
     cloud_init   = local.k8s_cloud_init_sha
     image        = var.multipass_image
     master_mem   = var.master_memory
@@ -93,19 +94,20 @@ resource "null_resource" "join_all" {
   depends_on = [null_resource.workers, null_resource.init_cluster]
 
   triggers = {
-    script_sha     = local.join_all_sha
-    name_prefix    = var.name_prefix
-    masters        = tostring(var.masters)
-    workers        = tostring(var.workers)
-    kubeconfig     = var.kubeconfig_path
-    cloud_init     = local.k8s_cloud_init_sha
-    image          = var.multipass_image
-    master_mem     = var.master_memory
-    master_cpus    = tostring(var.master_cpus)
-    master_disk    = var.master_disk
-    worker_mem     = var.worker_memory
-    worker_cpus    = tostring(var.worker_cpus)
-    worker_disk    = var.worker_disk
+    script_sha       = local.join_all_sha
+    name_prefix      = var.name_prefix
+    masters          = tostring(var.masters)
+    workers          = tostring(var.workers)
+    kubeconfig       = var.kubeconfig_path
+    vm_user          = var.vm_user
+    cloud_init       = local.k8s_cloud_init_sha
+    image            = var.multipass_image
+    master_mem       = var.master_memory
+    master_cpus      = tostring(var.master_cpus)
+    master_disk      = var.master_disk
+    worker_mem       = var.worker_memory
+    worker_cpus      = tostring(var.worker_cpus)
+    worker_disk      = var.worker_disk
     recreate_on_diff = tostring(var.recreate_on_diff)
   }
 

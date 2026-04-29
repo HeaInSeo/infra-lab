@@ -2,7 +2,7 @@
 # scripts/cluster/flannel-to-cilium.sh
 #
 # Flannel CNI → Cilium CNI 마이그레이션
-# 대상: multipass-k8s-lab (lab-master-0, lab-worker-0, lab-worker-1)
+# 대상: infra-lab (lab-master-0, lab-worker-0, lab-worker-1)
 #
 # 사전 조건:
 #   - multipass CLI 사용 가능 (VM 접근)

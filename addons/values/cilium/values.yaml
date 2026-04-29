@@ -1,4 +1,4 @@
-# Cilium Helm values — multipass-k8s-lab
+# Cilium Helm values — infra-lab
 # 대상: K8s v1.32, kubeadm 클러스터 (pod-network-cidr 10.244.0.0/16)
 # 용도: Gateway API GRPCRoute + L2 LB (MetalLB 대체)
 

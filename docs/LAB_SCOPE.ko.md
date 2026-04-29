@@ -2,7 +2,7 @@
 
 ## 요약
 
-`multipass-k8s-lab`은 범용 Kubernetes VM 랩 베이스라인입니다. 이 저장소의 역할은 Multipass 기반 Ubuntu 24.04 가상 머신 위에 반복 가능한 kubeadm 클러스터를 쉽게 생성, 삭제, 점검하고 가볍게 확장할 수 있게 만드는 것입니다.
+`infra-lab`은 범용 Kubernetes VM 랩 베이스라인입니다. 이 저장소의 역할은 Multipass 기반 Ubuntu 24.04 가상 머신 위에 반복 가능한 kubeadm 클러스터를 쉽게 생성, 삭제, 점검하고 가볍게 확장할 수 있게 만드는 것입니다.
 
 이 저장소는 하나의 K8s PoC를 코드화하기 위한 곳이 아니라, 앞으로의 다양한 K8s PoC를 지원하기 위해 존재합니다.
 
