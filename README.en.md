@@ -34,6 +34,8 @@ This repository is not a single-project environment. It is a shared lab infrastr
 
 More detail: [docs/LAB_SCOPE.md](docs/LAB_SCOPE.md)
 
+The standard operating commands and host-profile baseline are documented in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
 ## Quick Start
 
 1. Prepare the host:
@@ -42,12 +44,13 @@ More detail: [docs/LAB_SCOPE.md](docs/LAB_SCOPE.md)
 ./scripts/k8s-tool.sh host-setup
 ```
 
-To run against a remote lab host, you can point the entry script at a host profile:
+To run against a remote lab host, point the entry script at the default host profile:
 
 ```bash
-cp hosts/remote-lab.env.example hosts/remote-lab.env
 HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh status
 ```
+
+The default operating profile is already provided as [hosts/remote-lab.env](hosts/remote-lab.env). If you need another environment, copy [hosts/remote-lab.env.example](hosts/remote-lab.env.example) into a separate profile file and adjust it.
 
 2. Review defaults:
 

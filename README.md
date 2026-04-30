@@ -34,6 +34,8 @@ English: [README.en.md](README.en.md)
 
 자세한 내용: [docs/LAB_SCOPE.ko.md](docs/LAB_SCOPE.ko.md)
 
+운영 표준 명령과 host profile 기준은 [docs/OPERATIONS.ko.md](docs/OPERATIONS.ko.md)에 정리했습니다.
+
 ## 빠른 시작
 
 1. 호스트를 준비합니다.
@@ -42,12 +44,13 @@ English: [README.en.md](README.en.md)
 ./scripts/k8s-tool.sh host-setup
 ```
 
-원격 랩 호스트에서 실행하려면 host profile 을 지정할 수 있습니다.
+원격 랩 호스트에서 실행하려면 기본 host profile 을 지정할 수 있습니다.
 
 ```bash
-cp hosts/remote-lab.env.example hosts/remote-lab.env
 HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh status
 ```
+
+기본 운영 프로파일은 이미 [hosts/remote-lab.env](hosts/remote-lab.env)로 추가되어 있습니다. 다른 환경용 프로파일이 필요하면 [hosts/remote-lab.env.example](hosts/remote-lab.env.example)을 복사해 별도 파일로 조정하면 됩니다.
 
 2. 기본값을 확인합니다.
 
