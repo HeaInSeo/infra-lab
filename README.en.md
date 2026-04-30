@@ -3,22 +3,23 @@
 English: [README.en.md](README.en.md)
 한국어: [README.md](README.md)
 
-`infra-lab` is a reusable VM-based Kubernetes lab baseline for local and workstation-grade PoC work. The current baseline is intentionally narrow: Multipass + Ubuntu 24.04 guests + OpenTofu + kubeadm, with a repeatable 3-node cluster flow and a small set of infrastructure add-ons.
+`infra-lab` is a reusable VM-based Kubernetes lab baseline for local and workstation-grade PoC work. The current baseline stays intentionally narrow: OpenTofu + kubeadm, with the VM backend expanding toward both Multipass and libvirt.
 
 This repository is not a single-project environment. It is a shared lab infrastructure base for future Kubernetes experiments such as node-local artifact and storage flows, DaemonSet-style node agents, same-node reuse versus cross-node fetch behavior, Cilium and networking work, storage tests, operator validation, and other cluster-level PoCs.
 
 ## Identity
 
 - Purpose: general-purpose K8s VM lab infrastructure
-- Current baseline: Ubuntu 24.04 guests + Multipass + OpenTofu + kubeadm
+- Current baseline: Ubuntu 24.04 guests + OpenTofu + kubeadm
 - First target shape: 3 VMs, `1 control-plane + 2 workers`
 - Lifecycle support: host setup, cluster up/down, status, local clean
+- Backend model: `multipass`, `libvirt`
 - Add-on model: `base` and `optional`
 - Future extension point: `profiles/` for project-specific overlays without turning this repo into a workload repo
 
 ## What This Repo Owns
 
-- Multipass VM lifecycle for a kubeadm-based lab cluster
+- VM lifecycle for a kubeadm-based lab cluster through the selected backend
 - Baseline cluster bootstrap and kubeconfig export
 - Small operational scripts for repeatable local lab usage
 - A minimal add-on layer for cluster infrastructure capabilities
@@ -41,19 +42,29 @@ More detail: [docs/LAB_SCOPE.md](docs/LAB_SCOPE.md)
 ./scripts/k8s-tool.sh host-setup
 ```
 
+To run against a remote lab host, you can point the entry script at a host profile:
+
+```bash
+cp hosts/remote-lab.env.example hosts/remote-lab.env
+HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh status
+```
+
 2. Review defaults:
 
 ```bash
 sed -n '1,200p' dev.auto.tfvars
 ```
 
-3. Create the baseline cluster:
+3. Choose a backend and create the baseline cluster:
 
 ```bash
 ./scripts/k8s-tool.sh up
+BACKEND=libvirt ./scripts/k8s-tool.sh up
 ```
 
 If you change `name_prefix`, `masters`, `workers`, `vm_user`, or VM sizing in `dev.auto.tfvars`, rerunning `up` reapplies the OpenTofu plan against that updated shape.
+The libvirt backend also requires variables such as `TF_VAR_ssh_private_key_path` and `TF_VAR_ssh_public_key`.
+When the libvirt backend uses `qemu:///system`, the command may need `sudo` unless the host user already has libvirt management privileges.
 
 4. Check status:
 
@@ -90,15 +101,12 @@ FORCE=1 ./scripts/k8s-tool.sh clean
 ./scripts/k8s-tool.sh host-setup
 ```
 
-Installs or verifies:
+Host setup behavior depends on the backend:
 
-- OpenTofu
-- Multipass
-- Python 3
-- optional `kubectl`
-- optional `helm`
+- `BACKEND=multipass`: prepares the Multipass-oriented path, including OpenTofu and Python prerequisites
+- `BACKEND=libvirt`: verifies libvirt / virsh / qemu-img availability
 
-`host-setup` currently supports Rocky/RHEL-family hosts only.
+The current host setup helpers are still oriented toward Rocky/RHEL-family hosts.
 
 ### Cluster up
 
@@ -108,11 +116,12 @@ Installs or verifies:
 
 What happens:
 
-- OpenTofu initializes and applies local resources
-- Multipass launches Ubuntu 24.04 VMs
+- OpenTofu initializes and applies resources from the selected backend state directory
+- The selected backend launches Ubuntu 24.04 guests
 - `kubeadm init` runs on the first control-plane node
 - worker nodes join
-- local `./kubeconfig` is exported
+- the flow waits until all joined nodes report `Ready`
+- kubeconfig is exported on the execution host
 
 ### Status
 
@@ -120,7 +129,7 @@ What happens:
 ./scripts/k8s-tool.sh status
 ```
 
-If `./kubeconfig` exists and `kubectl` is present, node and pod status is shown. Otherwise the command falls back to `multipass list`.
+If `./kubeconfig` exists and `kubectl` is present, node and pod status is shown. Otherwise the command falls back to `multipass list` or `virsh list --all`, depending on the backend.
 
 ### Down
 
@@ -176,10 +185,14 @@ Examples:
 │   ├── optional/
 │   ├── values/
 │   └── manage.sh
+├── backends/
+│   └── libvirt/
 ├── cloud-init/
 ├── docs/
+├── hosts/
 ├── profiles/
 ├── scripts/
+│   ├── runtime/
 │   ├── host/
 │   ├── multipass/
 │   ├── cluster/
@@ -207,6 +220,9 @@ This repo references the earlier project but does not inherit its service-orient
 - The default CNI in the first baseline is Flannel for simplicity and quick bootstrap.
 - Cilium is intentionally deferred as a future profile or optional path, not forced into the baseline.
 - The guest baseline uses Ubuntu 24.04 because the public Multipass image catalog is Ubuntu-first in the current environment.
+- The libvirt backend relies on DHCP leases from the `default` libvirt network and does not hardcode a guest interface name.
+- As of April 30, 2026, the libvirt backend has been live-tested on `100.123.80.48` with `1 control-plane + 2 workers`.
 - Host helper scripts are still oriented around the existing Rocky 8 workstation setup flow.
+- The host / backend / transport split is documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - The earlier Rocky 8 based path may also hit the same class of control-plane instability seen during this sprint. If static pods churn or the API server becomes unstable, check runtime alignment first: `containerd --version`, `systemctl show -p ExecStart containerd`, `/etc/containerd/config.toml`, `crictl info`, and kubelet `cgroupDriver`, before changing `etcd` or `kube-apiserver` manifests.
 - A troubleshooting timeline based on the actual incident history is available at [docs/TROUBLESHOOTING_HISTORY.md](docs/TROUBLESHOOTING_HISTORY.md).

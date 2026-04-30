@@ -5,6 +5,28 @@ VM_USER="${VM_USER:-ubuntu}"
 VM_HOME="/home/${VM_USER}"
 POD_CIDR="${POD_CIDR:-10.244.0.0/16}"
 
+wait_for_guest_bootstrap() {
+  local bin deadline
+
+  if command -v cloud-init >/dev/null 2>&1; then
+    echo "[INFO] waiting for cloud-init"
+    sudo cloud-init status --wait
+  fi
+
+  deadline=$((SECONDS + 300))
+  for bin in kubeadm kubectl containerd; do
+    until command -v "$bin" >/dev/null 2>&1; do
+      if (( SECONDS >= deadline )); then
+        echo "[ERROR] timed out waiting for ${bin}" >&2
+        exit 1
+      fi
+      sleep 5
+    done
+  done
+}
+
+wait_for_guest_bootstrap
+
 MASTER_IP="$(hostname -I | awk '{print $1}')"
 
 if [[ -f /etc/kubernetes/admin.conf ]]; then
