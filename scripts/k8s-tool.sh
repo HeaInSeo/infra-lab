@@ -6,6 +6,7 @@ TOOL="${TOOL:-tofu}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-${ROOT_DIR}/kubeconfig}"
 BLOCKED_LOCAL_TS_IP="${BLOCKED_LOCAL_TS_IP:-100.92.45.46}"
 BACKEND="${BACKEND:-multipass}"
+AUTO_INSTALL_BASE_ADDONS="${AUTO_INSTALL_BASE_ADDONS:-1}"
 LAB_HOST_MODE="${LAB_HOST_MODE:-local}"
 LAB_REMOTE_SSH_TARGET="${LAB_REMOTE_SSH_TARGET:-}"
 LAB_REMOTE_REPO_PATH="${LAB_REMOTE_REPO_PATH:-}"
@@ -52,6 +53,7 @@ Env:
   LAB_REMOTE_SSH_TARGET=user@host
   LAB_REMOTE_REPO_PATH=/path/to/infra-lab
   LAB_REMOTE_SSH_CONFIG=/dev/null
+  AUTO_INSTALL_BASE_ADDONS=1
   TOOL=tofu|terraform
   KUBECONFIG_PATH=/path/to/kubeconfig
   FORCE=1
@@ -221,6 +223,12 @@ case "$cmd" in
       "$TOOL" plan
       "$TOOL" apply -auto-approve
     )
+    if [[ "$AUTO_INSTALL_BASE_ADDONS" == "1" ]]; then
+      echo "[INFO] install default base add-ons"
+      bash "${ROOT_DIR}/addons/manage.sh" install base
+      echo "[INFO] verify default base add-ons"
+      bash "${ROOT_DIR}/addons/manage.sh" verify base
+    fi
     ;;
   down)
     ensure_local_vm_allowed

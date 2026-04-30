@@ -48,6 +48,8 @@ Bring up the remote Multipass lab:
 HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh up
 ```
 
+This path now installs the default base add-on set automatically after cluster bootstrap. At the moment, that means `metrics-server`.
+
 Bring up the remote libvirt lab:
 
 ```bash
@@ -67,6 +69,8 @@ Verify addons:
 HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh addons-verify
 HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh addons-verify optional metallb
 ```
+
+`addons-verify` now fails if the default base add-ons are missing.
 
 ## Boundary with higher-level repos
 

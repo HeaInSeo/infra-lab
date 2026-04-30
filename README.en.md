@@ -75,14 +75,13 @@ When the libvirt backend uses `qemu:///system`, the command may need `sudo` unle
 ./scripts/k8s-tool.sh status
 ```
 
-5. Install base add-ons:
+5. Verify the base add-ons:
 
 ```bash
-./scripts/k8s-tool.sh addons-install base
 ./scripts/k8s-tool.sh addons-verify
 ```
 
-`addons-verify` checks the base add-ons plus any optional add-ons that are currently installed. To target one add-on explicitly, use a scoped command such as `./scripts/k8s-tool.sh addons-verify optional cilium`.
+`up` now installs the base add-on `metrics-server` by default. `addons-verify` now expects the base add-ons to actually exist. To target one optional add-on explicitly, use a scoped command such as `./scripts/k8s-tool.sh addons-verify optional cilium`.
 
 6. Tear down:
 
@@ -156,7 +155,7 @@ The repo separates infrastructure add-ons into two categories.
 
 ### Base
 
-Base add-ons are reasonable defaults for a lab cluster and do not make the repository specific to one PoC.
+Base add-ons are reasonable defaults for a lab cluster and do not make the repository specific to one PoC. They are now treated as part of the default baseline installed after `up`.
 
 - `metrics-server`
 
@@ -176,6 +175,8 @@ Examples:
 ./scripts/k8s-tool.sh addons-verify
 ./scripts/k8s-tool.sh addons-verify optional metallb
 ```
+
+Use `addons-install base` to repair or reapply the default base add-ons if needed.
 
 `metallb` requires review of [addons/values/metallb/ipaddresspool.yaml](addons/values/metallb/ipaddresspool.yaml) before use.
 

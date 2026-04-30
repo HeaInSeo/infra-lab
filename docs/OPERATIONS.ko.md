@@ -48,6 +48,8 @@ HOST_PROFILE=hosts/remote-lab.env BACKEND=libvirt ./scripts/k8s-tool.sh host-set
 HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh up
 ```
 
+이 경로는 이제 클러스터 bootstrap 뒤에 기본 base 애드온 세트도 자동 설치합니다. 현재 기준으로는 `metrics-server`가 여기에 포함됩니다.
+
 원격 libvirt 랩 생성:
 
 ```bash
@@ -67,6 +69,8 @@ HOST_PROFILE=hosts/remote-lab.env BACKEND=libvirt ./scripts/k8s-tool.sh down
 HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh addons-verify
 HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh addons-verify optional metallb
 ```
+
+이제 `addons-verify`는 기본 base 애드온이 빠져 있으면 실패합니다.
 
 ## 상위 저장소와의 경계
 
