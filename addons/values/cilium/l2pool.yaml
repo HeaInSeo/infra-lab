@@ -1,6 +1,6 @@
 ---
 # CiliumLoadBalancerIPPool — L2 LB IP 풀
-# EXTERNAL-IP 10.113.24.96 → nodeforge.10.113.24.96.nip.io 에 대응
+# EXTERNAL-IP 10.113.24.96 → nodevault.10.113.24.96.nip.io 에 대응
 # 환경에 따라 spec.blocks[].cidr 를 수정할 것
 apiVersion: "cilium.io/v2alpha1"
 kind: CiliumLoadBalancerIPPool

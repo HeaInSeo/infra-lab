@@ -1,0 +1,34 @@
+---
+# NodeVault GRPCRoute — Cilium Gateway를 통해 NodeVault gRPC 엔드포인트 노출
+#
+# ⚠ 현재 NodeVault는 seoy 호스트 바이너리로 실행되며 in-cluster 배포가 아니다.
+#   이 GRPCRoute는 미래 in-cluster 전환 시 사용할 정의로 보관한다.
+#
+# 전제 조건:
+#   - Gateway k8s/gateway/01-gateway.yaml 적용 완료
+#   - NodeVault deploy/ 매니페스트 적용 완료 (in-cluster 전환 시)
+#       kubectl apply -f /opt/go/src/github.com/HeaInSeo/NodeVault/deploy/
+#
+# NodeKit에서 접속 방법:
+#   addr := "nodevault.10.113.24.96.nip.io:80"
+#   conn, err := grpc.NewClient(addr,
+#       grpc.WithTransportCredentials(insecure.NewCredentials()))
+#
+# 확인 명령:
+#   kubectl get grpcroute -n nodevault-system
+#   grpcurl -plaintext nodevault.10.113.24.96.nip.io:80 list
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: nodevault-grpc
+  namespace: nodevault-system
+spec:
+  parentRefs:
+    - name: cilium-gateway
+      namespace: nodevault-system
+  hostnames:
+    - "nodevault.10.113.24.96.nip.io"
+  rules:
+    - backendRefs:
+        - name: nodevault-controlplane
+          port: 50051

@@ -22,7 +22,7 @@ metadata:
 spec:
   parentRefs:
     - name: cilium-gateway
-      namespace: nodeforge-system
+      namespace: nodevault-system
   hostnames:
     - "harbor.10.113.24.96.nip.io"
   rules:
@@ -30,7 +30,7 @@ spec:
         - name: harbor
           port: 80
 ---
-# ReferenceGrant: nodeforge-system 네임스페이스의 Gateway가
+# ReferenceGrant: nodevault-system 네임스페이스의 Gateway가
 # harbor 네임스페이스의 Service를 backendRef로 참조할 수 있도록 허용
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
