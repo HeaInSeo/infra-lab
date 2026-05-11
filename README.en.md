@@ -35,6 +35,7 @@ This repository is not a single-project environment. It is a shared lab infrastr
 More detail: [docs/LAB_SCOPE.md](docs/LAB_SCOPE.md)
 
 The standard operating commands and host-profile baseline are documented in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+The `remote-seoy` Cilium operating baseline and read-only verification flow are documented in [profiles/remote-seoy/cilium/README.ko.md](profiles/remote-seoy/cilium/README.ko.md).
 
 ## Quick Start
 
@@ -84,6 +85,13 @@ When the libvirt backend uses `qemu:///system`, the command may need `sudo` unle
 `up` now installs the base add-on `metrics-server` by default. `addons-verify` now expects the base add-ons to actually exist. To target one optional add-on explicitly, use a scoped command such as `./scripts/k8s-tool.sh addons-verify optional cilium`.
 
 Because of the current kubelet certificate shape in this lab baseline, the `metrics-server` install path applies `--kubelet-insecure-tls`.
+
+To inspect the `remote-seoy` Cilium baseline in a read-only way:
+
+```bash
+HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-cilium-verify
+HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-gateway-verify
+```
 
 6. Tear down:
 

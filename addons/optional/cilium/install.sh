@@ -2,6 +2,11 @@
 # addons/optional/cilium/install.sh
 # Cilium 1.16 설치 (Gateway API + L2 LB)
 # 선행 조건: Flannel 이미 제거됨 (scripts/cluster/flannel-to-cilium.sh 실행 후)
+#
+# 중요:
+# - 이 스크립트는 generic addon 설치 경로다.
+# - remote-seoy live 기준선은 profiles/remote-seoy/cilium 에 별도 정리한다.
+# - 운영 중인 기존 클러스터에 대해 IPAM mode 변경을 유발하는 업그레이드 경로로 사용하지 않는다.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"

@@ -73,6 +73,17 @@ HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh addons-verify optional m
 
 `addons-verify` now fails if the default base add-ons are missing.
 
+Read-only collection and verification for the `remote-seoy` Cilium baseline:
+
+```bash
+HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-cilium-collect
+HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-cilium-verify
+HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-gateway-verify
+```
+
+These commands call the scripts under `profiles/remote-seoy/cilium/verify/` and do not mutate cluster resources.
+`profile-cilium-collect` refreshes snapshot files, so use it only when you intentionally want to recapture the current operating evidence into the repository.
+
 ## Boundary with higher-level repos
 
 Higher-level repos such as JUMI, AH, and `kube-slint` should treat this document as the operating baseline.

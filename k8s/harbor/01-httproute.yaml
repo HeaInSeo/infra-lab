@@ -2,9 +2,12 @@
 # Harbor HTTPRoute — Cilium Gateway를 통해 Harbor 웹 UI + API 노출
 #
 # 전제 조건:
+#   - 이 파일은 generic / future-facing 예제에 가깝다.
+#   - remote-seoy live 기준선은 profiles/remote-seoy/cilium 을 본다.
 #   - Harbor Helm 설치 (harbor 네임스페이스)
 #   - Gateway k8s/gateway/01-gateway.yaml 적용 완료
 #   - Harbor externalURL: http://harbor.10.113.24.96.nip.io
+#   - cross-namespace parentRef 허용은 Gateway listener.allowedRoutes 설정으로 결정된다.
 #
 # Harbor Helm values 핵심 설정:
 #   externalURL: http://harbor.10.113.24.96.nip.io
@@ -29,19 +32,3 @@ spec:
     - backendRefs:
         - name: harbor
           port: 80
----
-# ReferenceGrant: nodevault-system 네임스페이스의 Gateway가
-# harbor 네임스페이스의 Service를 backendRef로 참조할 수 있도록 허용
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: harbor-from-gateway
-  namespace: harbor
-spec:
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: harbor
-  to:
-    - group: ""
-      kind: Service

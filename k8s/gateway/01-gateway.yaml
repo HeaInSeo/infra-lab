@@ -1,6 +1,11 @@
 ---
 # Cilium Gateway — HTTPRoute(Harbor) + GRPCRoute(NodeVault) 공용 진입점
 #
+# 주의:
+#   - 이 파일은 generic / future-facing 예제에 가깝다.
+#   - remote-seoy live 기준선은 profiles/remote-seoy/cilium 을 본다.
+#   - remote-seoy live는 harbor/lab-gateway + HTTP/HTTPS listener 기준이며, 이 파일과 1:1로 같지 않다.
+#
 # Cilium kube-proxy-replacement + Gateway API 설정 이후 적용한다.
 # Cilium Helm 설치 시 kubeProxyReplacement=true 가 필요하다.
 #

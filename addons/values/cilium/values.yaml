@@ -1,6 +1,11 @@
-# Cilium Helm values — infra-lab
+# Cilium Helm values — infra-lab generic example
 # 대상: K8s v1.32, kubeadm 클러스터 (pod-network-cidr 10.244.0.0/16)
 # 용도: Gateway API GRPCRoute + L2 LB (MetalLB 대체)
+#
+# 중요:
+# - 이 파일은 generic/default 예제다.
+# - remote-seoy live 기준은 profiles/remote-seoy/cilium 을 본다.
+# - 운영 중인 기존 클러스터의 IPAM mode 변경 경로로 사용하지 않는다.
 
 # kubeadm pod-network-cidr 을 그대로 사용
 ipam:

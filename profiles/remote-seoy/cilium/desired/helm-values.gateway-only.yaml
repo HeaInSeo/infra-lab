@@ -1,0 +1,36 @@
+# remote-seoy 신규 재현용 Cilium Helm values 기준선
+#
+# 중요:
+# - 이 파일은 remote-seoy VM lab의 "신규 재현/문서 기준"이다.
+# - 기존 운영 클러스터에 대해 이 파일을 근거로 무작정 `helm upgrade` 하지 말 것.
+# - 특히 `ipam.mode`는 기존 클러스터에서 변경 금지다.
+# - 운영 중인 기존 클러스터의 IPAM 변경은 새 클러스터/새 profile 작업으로만 다룬다.
+
+cluster:
+  name: kubernetes
+
+# remote-seoy live 기준선은 cluster-pool 이다.
+# 하지만 이 값은 기존 generic addon 값을 덮어쓰기 위한 용도가 아니다.
+ipam:
+  mode: cluster-pool
+
+kubeProxyReplacement: true
+
+operator:
+  replicas: 1
+
+routingMode: tunnel
+tunnelProtocol: vxlan
+
+gatewayAPI:
+  enabled: true
+
+l2announcements:
+  enabled: true
+
+# live에서는 Hubble 이 활성화되어 있다.
+hubble:
+  enabled: true
+
+debug:
+  enabled: false
