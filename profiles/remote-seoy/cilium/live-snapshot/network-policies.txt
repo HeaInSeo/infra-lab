@@ -1,0 +1,5 @@
+No CiliumNetworkPolicy or CiliumClusterwideNetworkPolicy resources were present in the live remote-seoy cluster at snapshot time.
+
+Command:
+
+kubectl get cnp,ccnp -A

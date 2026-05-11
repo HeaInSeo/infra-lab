@@ -73,6 +73,17 @@ HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh addons-verify optional m
 
 이제 `addons-verify`는 기본 base 애드온이 빠져 있으면 실패합니다.
 
+`remote-seoy` Cilium 기준선 read-only 수집 및 검증:
+
+```bash
+HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-cilium-collect
+HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-cilium-verify
+HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-gateway-verify
+```
+
+이 명령들은 `profiles/remote-seoy/cilium/verify/` 아래 스크립트를 호출하며, 클러스터 리소스를 변경하지 않는다.
+`profile-cilium-collect`는 snapshot 파일을 갱신하므로, 실행 시점의 운영 증거를 레포 안에 다시 수집하는 용도로만 사용한다.
+
 ## 상위 저장소와의 경계
 
 JUMI, AH, `kube-slint` 같은 상위 저장소는 이 문서를 기준으로 랩 클러스터를 사용합니다.

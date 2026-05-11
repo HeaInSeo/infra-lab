@@ -45,6 +45,9 @@ Commands:
   addons-install <base|optional> [name]
   addons-uninstall <base|optional> [name]
   addons-verify [base|optional] [name]
+  profile-cilium-collect            Collect remote-seoy Cilium live snapshot (read-only)
+  profile-cilium-verify             Verify remote-seoy Cilium baseline (read-only)
+  profile-gateway-verify            Verify remote-seoy Gateway baseline (read-only)
 
 Env:
   BACKEND=multipass|libvirt
@@ -147,6 +150,17 @@ passthrough_env() {
         ;;
     esac
   done < <(env)
+}
+
+run_profile_script() {
+  local script_path="$1"
+
+  [[ -x "$script_path" ]] || {
+    echo "profile script is not executable: $script_path" >&2
+    exit 1
+  }
+
+  bash "$script_path"
 }
 
 run_remote() {
@@ -277,6 +291,15 @@ case "$cmd" in
     ;;
   addons-verify)
     bash "${ROOT_DIR}/addons/manage.sh" verify "$@"
+    ;;
+  profile-cilium-collect)
+    run_profile_script "${ROOT_DIR}/profiles/remote-seoy/cilium/verify/collect-live-state.sh"
+    ;;
+  profile-cilium-verify)
+    run_profile_script "${ROOT_DIR}/profiles/remote-seoy/cilium/verify/verify-cilium.sh"
+    ;;
+  profile-gateway-verify)
+    run_profile_script "${ROOT_DIR}/profiles/remote-seoy/cilium/verify/verify-gateway.sh"
     ;;
   *)
     usage
