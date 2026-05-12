@@ -1,4 +1,4 @@
-KVStore:                 Disabled
+KVStore:                 Disabled   
 Kubernetes:              Ok         1.32 (v1.32.13) [linux/amd64]
 Kubernetes APIs:         ["cilium/v2::CiliumCIDRGroup", "cilium/v2::CiliumClusterwideEnvoyConfig", "cilium/v2::CiliumClusterwideNetworkPolicy", "cilium/v2::CiliumEndpoint", "cilium/v2::CiliumEnvoyConfig", "cilium/v2::CiliumNetworkPolicy", "cilium/v2::CiliumNode", "core/v1::Pods", "networking.k8s.io/v1::NetworkPolicy"]
 KubeProxyReplacement:    True   [ens3   fe80::5054:ff:fee9:8594 10.113.24.35 (Direct Routing)]
@@ -8,8 +8,8 @@ CNI Chaining:            none
 CNI Config file:         successfully wrote CNI configuration file to /host/etc/cni/net.d/05-cilium.conflist
 Cilium:                  Ok   1.19.1 (v1.19.1-d0d0c879)
 NodeMonitor:             Listening for events on 2 CPUs with 64x4096 of shared memory
-Cilium health daemon:    Ok
-IPAM:                    IPv4: 19/254 allocated from 10.0.1.0/24,
+Cilium health daemon:    Ok   
+IPAM:                    IPv4: 20/254 allocated from 10.0.1.0/24, 
 IPv4 BIG TCP:            Disabled
 IPv6 BIG TCP:            Disabled
 BandwidthManager:        Disabled
@@ -17,10 +17,11 @@ Routing:                 Network: Tunnel [vxlan]   Host: Legacy
 Attach Mode:             TCX
 Device Mode:             veth
 Masquerading:            IPTables [IPv4: Enabled, IPv6: Disabled]
-Controller Status:       95/95 healthy
+Controller Status:       100/100 healthy
 Proxy Status:            OK, ip 10.0.1.245, 0 redirects active on ports 10000-20000, Envoy: external
 Global Identity Range:   min 256, max 65535
 Hubble:                  Ok              Current/Max Flows: 4095/4095 (100.00%), Flows/s: 39.31   Metrics: Disabled
-Encryption:              Disabled
-Cluster health:          3/3 reachable
-Modules Health:          Stopped(24) Degraded(0) OK(126)
+Encryption:              Disabled        
+Cluster health:          3/3 reachable   (2026-05-10T11:31:50Z)   (Probe interval: 1m56.754608943s)
+Name                     IP              Node                     Endpoints
+Modules Health:          Stopped(24) Degraded(0) OK(129)

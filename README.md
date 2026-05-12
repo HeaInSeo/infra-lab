@@ -37,6 +37,7 @@ English: [README.en.md](README.en.md)
 운영 표준 명령과 host profile 기준은 [docs/OPERATIONS.ko.md](docs/OPERATIONS.ko.md)에 정리했습니다.
 
 `remote-seoy` Cilium 운영 기준선과 read-only 검증 절차는 [profiles/remote-seoy/cilium/README.ko.md](profiles/remote-seoy/cilium/README.ko.md)에 정리했습니다.
+프로젝트 전체 상세 설명은 [docs/PROJECT_GUIDE.ko.md](docs/PROJECT_GUIDE.ko.md), `remote-seoy` Cilium 상세 설명은 [docs/CILIUM_REMOTE_SEOY.ko.md](docs/CILIUM_REMOTE_SEOY.ko.md)에 정리했습니다.
 
 ## 빠른 시작
 

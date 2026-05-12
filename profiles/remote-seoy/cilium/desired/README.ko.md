@@ -16,6 +16,12 @@
 - LB IPAM + L2 announcement
 - Harbor / dev-space-observability HTTPRoute
 
+현재 의도적으로 desired baseline에 넣지 않은 live Route:
+
+- `shift-left-observability`
+
+이 Route는 실제 live snapshot에는 존재하지만, 특정 workload가 부착한 운영 시점 Route로 보고 있다. 공용 infra baseline의 일부로 자동 승격하지 않는다.
+
 이번 baseline에 포함하지 않는 것:
 
 - east-west service mesh

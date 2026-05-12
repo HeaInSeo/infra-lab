@@ -16,6 +16,12 @@
 - `GAMMA`는 Service `parentRef` 기반 east-west `HTTPRoute` 실험으로 `experimental/` 아래에 분리한다.
 - mutual auth / SPIRE / mTLS는 아직 운영 기준선에 넣지 않는다.
 
+Route 분류 원칙:
+
+- `desired/`에는 infra baseline으로 재현하고 싶은 공용 Route만 넣는다.
+- 현재는 `harbor-route`와 `dev-space-observability`만 desired baseline에 포함한다.
+- `shift-left-observability`처럼 특정 시점 workload가 추가한 Route는 `live-snapshot/`에는 기록하되, baseline desired에는 자동 편입하지 않는다.
+
 IPAM 관련 안전 원칙:
 
 - `remote-seoy` live는 현재 `cluster-pool + vxlan` 기준으로 동작한다.

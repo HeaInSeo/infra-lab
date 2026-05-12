@@ -36,6 +36,7 @@ More detail: [docs/LAB_SCOPE.md](docs/LAB_SCOPE.md)
 
 The standard operating commands and host-profile baseline are documented in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 The `remote-seoy` Cilium operating baseline and read-only verification flow are documented in [profiles/remote-seoy/cilium/README.ko.md](profiles/remote-seoy/cilium/README.ko.md).
+Detailed project explanation is documented in [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md), and the detailed `remote-seoy` Cilium explanation is documented in [docs/CILIUM_REMOTE_SEOY.md](docs/CILIUM_REMOTE_SEOY.md).
 
 ## Quick Start
 

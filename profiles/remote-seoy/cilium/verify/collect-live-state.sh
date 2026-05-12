@@ -34,7 +34,7 @@ kubectl get ciliumloadbalancerippools.cilium.io -A -o yaml \
   > "${SNAPSHOT_DIR}/lb-pool.yaml"
 kubectl get ciliuml2announcementpolicies.cilium.io -A -o yaml \
   > "${SNAPSHOT_DIR}/l2-announcement-policy.yaml"
-kubectl get cnp,ccnp -A \
+kubectl get cnp,ccnp -A 2>&1 \
   > "${SNAPSHOT_DIR}/network-policies.txt"
 kubectl get ciliumenvoyconfig -A \
   > "${SNAPSHOT_DIR}/ciliumenvoyconfigs.txt"

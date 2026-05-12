@@ -69,7 +69,7 @@ live 기준선은 [profiles/remote-seoy/cilium/live-snapshot](/opt/go/src/github
 현재 live 리소스:
 
 - Gateway: `harbor/lab-gateway`
-- HTTPRoute: `harbor-route`, `dev-space-observability`
+- HTTPRoute: `harbor-route`, `dev-space-observability`, `shift-left-observability`
 - GRPCRoute: 없음
 - CiliumNetworkPolicy / CiliumClusterwideNetworkPolicy: 없음
 
@@ -129,6 +129,8 @@ live 기준선은 [profiles/remote-seoy/cilium/live-snapshot](/opt/go/src/github
 - `allowedRoutes.namespaces.from: All`
 - `harbor-route`
 - `dev-space-observability`
+
+다만 `shift-left-observability`는 현재 live snapshot에 존재해도 공용 infra baseline으로는 아직 분류하지 않는다. 이는 “Cilium baseline의 일부”라기보다 “현재 workload가 Gateway에 추가로 부착한 Route”로 보는 편이 안전하다.
 
 `GRPCRoute`는 현재 운영에 없다.
 

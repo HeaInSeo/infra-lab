@@ -1,57 +1,207 @@
 apiVersion: v1
-kind: List
 items:
-  - apiVersion: gateway.networking.k8s.io/v1
-    kind: HTTPRoute
-    metadata:
-      name: harbor-route
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"gateway.networking.k8s.io/v1","kind":"HTTPRoute","metadata":{"annotations":{},"name":"dev-space-observability","namespace":"dev-space"},"spec":{"hostnames":["dev-space.10.113.24.96.nip.io"],"parentRefs":[{"name":"lab-gateway","namespace":"harbor"}],"rules":[{"backendRefs":[{"name":"dev-space-observability","port":80}]}]}}
+    creationTimestamp: "2026-04-30T11:21:16Z"
+    generation: 1
+    name: dev-space-observability
+    namespace: dev-space
+    resourceVersion: "2880235"
+    uid: 6e6a540e-29aa-4b99-9219-34a80a13f783
+  spec:
+    hostnames:
+    - dev-space.10.113.24.96.nip.io
+    parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: lab-gateway
       namespace: harbor
-    spec:
-      hostnames:
-        - harbor.10.113.24.96.nip.io
-      parentRefs:
-        - group: gateway.networking.k8s.io
-          kind: Gateway
-          name: lab-gateway
-          namespace: harbor
-          sectionName: http
-        - group: gateway.networking.k8s.io
-          kind: Gateway
-          name: lab-gateway
-          namespace: harbor
-          sectionName: https
-      rules:
-        - matches:
-            - path:
-                type: PathPrefix
-                value: /
-          backendRefs:
-            - group: ""
-              kind: Service
-              name: harbor
-              port: 80
-              weight: 1
-  - apiVersion: gateway.networking.k8s.io/v1
-    kind: HTTPRoute
-    metadata:
-      name: dev-space-observability
-      namespace: dev-space
-    spec:
-      hostnames:
-        - dev-space.10.113.24.96.nip.io
-      parentRefs:
-        - group: gateway.networking.k8s.io
-          kind: Gateway
-          name: lab-gateway
-          namespace: harbor
-      rules:
-        - matches:
-            - path:
-                type: PathPrefix
-                value: /
-          backendRefs:
-            - group: ""
-              kind: Service
-              name: dev-space-observability
-              port: 80
-              weight: 1
+    rules:
+    - backendRefs:
+      - group: ""
+        kind: Service
+        name: dev-space-observability
+        port: 80
+        weight: 1
+      matches:
+      - path:
+          type: PathPrefix
+          value: /
+  status:
+    parents:
+    - conditions:
+      - lastTransitionTime: "2026-04-30T11:21:16Z"
+        message: Accepted HTTPRoute
+        observedGeneration: 1
+        reason: Accepted
+        status: "True"
+        type: Accepted
+      - lastTransitionTime: "2026-04-30T11:21:16Z"
+        message: Service reference is valid
+        observedGeneration: 1
+        reason: ResolvedRefs
+        status: "True"
+        type: ResolvedRefs
+      controllerName: io.cilium/gateway-controller
+      parentRef:
+        group: gateway.networking.k8s.io
+        kind: Gateway
+        name: lab-gateway
+        namespace: harbor
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"gateway.networking.k8s.io/v1","kind":"HTTPRoute","metadata":{"annotations":{},"name":"harbor-route","namespace":"harbor"},"spec":{"hostnames":["harbor.10.113.24.96.nip.io"],"parentRefs":[{"name":"lab-gateway","namespace":"harbor","sectionName":"http"},{"name":"lab-gateway","namespace":"harbor","sectionName":"https"}],"rules":[{"backendRefs":[{"name":"harbor","port":80}],"matches":[{"path":{"type":"PathPrefix","value":"/"}}]}]}}
+    creationTimestamp: "2026-04-11T12:49:32Z"
+    generation: 3
+    name: harbor-route
+    namespace: harbor
+    resourceVersion: "214594"
+    uid: bfff52ea-048d-42a9-94a6-006321c7dc57
+  spec:
+    hostnames:
+    - harbor.10.113.24.96.nip.io
+    parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: lab-gateway
+      namespace: harbor
+      sectionName: http
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: lab-gateway
+      namespace: harbor
+      sectionName: https
+    rules:
+    - backendRefs:
+      - group: ""
+        kind: Service
+        name: harbor
+        port: 80
+        weight: 1
+      matches:
+      - path:
+          type: PathPrefix
+          value: /
+  status:
+    parents:
+    - conditions:
+      - lastTransitionTime: "2026-04-11T12:57:48Z"
+        message: Accepted HTTPRoute
+        observedGeneration: 2
+        reason: Accepted
+        status: "True"
+        type: Accepted
+      - lastTransitionTime: "2026-04-11T12:57:48Z"
+        message: Service reference is valid
+        observedGeneration: 2
+        reason: ResolvedRefs
+        status: "True"
+        type: ResolvedRefs
+      controllerName: io.cilium/gateway-controller
+      parentRef:
+        group: gateway.networking.k8s.io
+        kind: Gateway
+        name: lab-gateway
+        namespace: harbor
+    - conditions:
+      - lastTransitionTime: "2026-04-12T14:45:54Z"
+        message: Accepted HTTPRoute
+        observedGeneration: 3
+        reason: Accepted
+        status: "True"
+        type: Accepted
+      - lastTransitionTime: "2026-04-12T14:45:54Z"
+        message: Service reference is valid
+        observedGeneration: 3
+        reason: ResolvedRefs
+        status: "True"
+        type: ResolvedRefs
+      controllerName: io.cilium/gateway-controller
+      parentRef:
+        group: gateway.networking.k8s.io
+        kind: Gateway
+        name: lab-gateway
+        namespace: harbor
+        sectionName: http
+    - conditions:
+      - lastTransitionTime: "2026-04-12T14:45:54Z"
+        message: Accepted HTTPRoute
+        observedGeneration: 3
+        reason: Accepted
+        status: "True"
+        type: Accepted
+      - lastTransitionTime: "2026-04-12T14:45:54Z"
+        message: Service reference is valid
+        observedGeneration: 3
+        reason: ResolvedRefs
+        status: "True"
+        type: ResolvedRefs
+      controllerName: io.cilium/gateway-controller
+      parentRef:
+        group: gateway.networking.k8s.io
+        kind: Gateway
+        name: lab-gateway
+        namespace: harbor
+        sectionName: https
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"gateway.networking.k8s.io/v1","kind":"HTTPRoute","metadata":{"annotations":{},"name":"shift-left-observability","namespace":"shift-left-observability"},"spec":{"hostnames":["shift-left-observability.10.113.24.96.nip.io"],"parentRefs":[{"name":"lab-gateway","namespace":"harbor"}],"rules":[{"backendRefs":[{"name":"shift-left-observability","port":80}]}]}}
+    creationTimestamp: "2026-05-10T09:00:06Z"
+    generation: 1
+    name: shift-left-observability
+    namespace: shift-left-observability
+    resourceVersion: "5141396"
+    uid: 237a6d00-d06d-4986-9ced-61bfe4ed31f0
+  spec:
+    hostnames:
+    - shift-left-observability.10.113.24.96.nip.io
+    parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: lab-gateway
+      namespace: harbor
+    rules:
+    - backendRefs:
+      - group: ""
+        kind: Service
+        name: shift-left-observability
+        port: 80
+        weight: 1
+      matches:
+      - path:
+          type: PathPrefix
+          value: /
+  status:
+    parents:
+    - conditions:
+      - lastTransitionTime: "2026-05-10T09:00:06Z"
+        message: Accepted HTTPRoute
+        observedGeneration: 1
+        reason: Accepted
+        status: "True"
+        type: Accepted
+      - lastTransitionTime: "2026-05-10T09:00:06Z"
+        message: Service reference is valid
+        observedGeneration: 1
+        reason: ResolvedRefs
+        status: "True"
+        type: ResolvedRefs
+      controllerName: io.cilium/gateway-controller
+      parentRef:
+        group: gateway.networking.k8s.io
+        kind: Gateway
+        name: lab-gateway
+        namespace: harbor
+kind: List
+metadata:
+  resourceVersion: ""

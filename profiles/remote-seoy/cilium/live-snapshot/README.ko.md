@@ -18,7 +18,7 @@
 - LB IP Pool: `10.113.24.100/28`
 - L2 interface: `mpqemubr0`
 - live Gateway: `harbor/lab-gateway`
-- live HTTPRoute: `harbor-route`, `dev-space-observability`
+- live HTTPRoute: `harbor-route`, `dev-space-observability`, `shift-left-observability`
 - live GRPCRoute: 없음
 - live CiliumNetworkPolicy / CiliumClusterwideNetworkPolicy: 없음
 - live CiliumEnvoyConfig: gateway controller가 생성한 `cilium-gateway-lab-gateway`
