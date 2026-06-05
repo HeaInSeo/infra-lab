@@ -1,0 +1,37 @@
+name: workflow-lint
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run actionlint
+        uses: rhysd/actionlint@v1.7.12
+
+  no-floating-runner:
+    name: No ubuntu-latest
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Disallow ubuntu-latest in workflows
+        run: |
+          if grep -rn "ubuntu-latest" .github/workflows/; then
+            echo "Use a pinned runner (e.g. ubuntu-24.04) instead of ubuntu-latest." >&2
+            exit 1
+          fi
