@@ -208,7 +208,7 @@ passthrough_env() {
 }
 
 _write_vm_build_json() {
-  local _commit _branch _runtime
+  local _commit _branch _runtime _master_endpoints="" _worker_endpoints=""
   _commit="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
   _branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 
@@ -223,10 +223,37 @@ _write_vm_build_json() {
     return
   fi
 
+  # For libvirt SSH runtime, extract VM IPs from tofu state when not already set.
+  if [[ "$_runtime" == "ssh" && -z "${MASTER_ENDPOINTS:-}" && -z "${WORKER_ENDPOINTS:-}" ]]; then
+    local _state_file="${STATE_DIR:+${STATE_DIR}/terraform.tfstate}"
+    _state_file="${_state_file:-$(backend_dir)/terraform.tfstate}"
+    if [[ -f "$_state_file" ]] && command -v jq >/dev/null 2>&1; then
+      local _triggers
+      _triggers="$(jq -r '
+        .resources[]
+        | select(.type == "null_resource" and .name == "join_all")
+        | .instances[0].attributes.triggers
+      ' "$_state_file" 2>/dev/null)"
+      local _m0
+      _m0="$(printf '%s' "$_triggers" | jq -r '.master0_ip // ""')"
+      local _m_extra
+      _m_extra="$(printf '%s' "$_triggers" | jq -r '.master_ips // ""')"
+      _worker_endpoints="$(printf '%s' "$_triggers" | jq -r '.worker_ips // ""')"
+      # master_ips holds extra masters (HA); for single-master clusters it is empty
+      if [[ -n "$_m_extra" ]]; then
+        _master_endpoints="${_m0},${_m_extra}"
+      else
+        _master_endpoints="${_m0}"
+      fi
+    fi
+  fi
+
   echo "[INFO] writing /etc/infra-lab/build.json to all VMs"
   VM_RUNTIME="$_runtime" \
   INFRA_LAB_GIT_COMMIT="$_commit" \
   INFRA_LAB_GIT_BRANCH="$_branch" \
+  MASTER_ENDPOINTS="${MASTER_ENDPOINTS:-${_master_endpoints}}" \
+  WORKER_ENDPOINTS="${WORKER_ENDPOINTS:-${_worker_endpoints}}" \
   bash "${ROOT_DIR}/scripts/cluster/write-build-json.sh" || \
     echo "[WARN] build.json write failed (non-fatal); run scripts/cluster/write-build-json.sh manually" >&2
 }
