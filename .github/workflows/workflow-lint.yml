@@ -31,7 +31,9 @@ jobs:
 
       - name: Disallow floating runner tags
         run: |
-          if grep -rn "runs-on:.*ubuntu-latest" .github/workflows/; then
+          # Exclude this file itself to avoid matching the pattern in the grep command below.
+          if grep -rn "runs-on:.*ubuntu-latest" .github/workflows/ \
+              --exclude=workflow-lint.yml; then
             echo "Use a pinned runner (e.g. ubuntu-24.04) instead of ubuntu-latest." >&2
             exit 1
           fi
