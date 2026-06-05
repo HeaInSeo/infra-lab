@@ -51,3 +51,21 @@ jobs:
 
       - name: Run YAML checks
         run: make lint-yaml
+
+  go:
+    name: Go
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ilab/go.mod
+          cache-dependency-path: ilab/go.sum
+
+      - name: Run Go checks
+        run: make lint-go
+
+      - name: Run Go tests
+        run: make test-go

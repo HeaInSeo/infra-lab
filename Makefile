@@ -82,13 +82,32 @@ env-status:
 env-clean:
 	FORCE=1 HOST_PROFILE="$(ENV_PROFILE)" bash scripts/k8s-tool.sh clean
 
+.PHONY: lint-go
+lint-go:
+	@echo "==> gofmt"
+	@test -z "$$(cd ilab && gofmt -l .)" || \
+	    { echo "unformatted Go files:"; cd ilab && gofmt -l .; exit 1; }
+	@echo "==> go vet"
+	@cd ilab && go vet ./...
+	@echo "==> go build"
+	@cd ilab && go build ./...
+	@echo "[OK] lint-go"
+
+.PHONY: test-go
+test-go:
+	@echo "==> go test"
+	@cd ilab && go test ./...
+	@echo "[OK] test-go"
+
 .PHONY: help
 help:
 	@echo "Lint targets (default: check):"
-	@echo "  check       Run all lint checks"
+	@echo "  check       Run all lint checks (shell + yaml + hcl)"
 	@echo "  lint-shell  bash -n + shellcheck"
 	@echo "  lint-yaml   YAML parse check"
 	@echo "  lint-hcl    tofu fmt + tofu validate"
+	@echo "  lint-go     gofmt + go vet + go build"
+	@echo "  test-go     go test ./..."
 	@echo ""
 	@echo "Environment targets:"
 	@echo "  env-up      Create cluster    (ENV_PROFILE=envs/<name>.env)"
