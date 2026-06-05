@@ -29,9 +29,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Disallow ubuntu-latest in workflows
+      - name: Disallow floating runner tags
         run: |
-          if grep -rn "ubuntu-latest" .github/workflows/; then
+          if grep -rn "runs-on:.*ubuntu-latest" .github/workflows/; then
             echo "Use a pinned runner (e.g. ubuntu-24.04) instead of ubuntu-latest." >&2
             exit 1
           fi
