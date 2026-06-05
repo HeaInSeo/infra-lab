@@ -12,6 +12,7 @@ hosts.generated
 hosts/*.env
 envs/*.env
 *.auto.tfvars
+.codex
 bin/
 *.bak
 __pycache__/
