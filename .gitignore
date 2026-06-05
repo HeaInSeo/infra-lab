@@ -7,6 +7,7 @@ tofu.tfstate.d/
 kubeconfig
 kubeconfig.libvirt
 kubeconfig*.meta
+state/
 hosts.generated
 hosts/*.env
 envs/*.env

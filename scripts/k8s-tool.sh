@@ -6,7 +6,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Capture user-passed env values before sourcing the profile so they take precedence.
 _env_BACKEND="${BACKEND:-}"
 _env_TOOL="${TOOL:-}"
-_env_KUBECONFIG_PATH="${KUBECONFIG_PATH:-}"
 _env_BLOCKED_LOCAL_TS_IP="${BLOCKED_LOCAL_TS_IP:-}"
 _env_AUTO_INSTALL_BASE_ADDONS="${AUTO_INSTALL_BASE_ADDONS:-}"
 _env_LAB_HOST_MODE="${LAB_HOST_MODE:-}"
@@ -16,6 +15,8 @@ _env_LAB_REMOTE_SSH_CONFIG="${LAB_REMOTE_SSH_CONFIG:-}"
 _env_CNI="${CNI:-}"
 _env_ADDONS="${ADDONS:-}"
 _env_NAME_PREFIX="${NAME_PREFIX:-}"
+_env_ENV_NAME="${ENV_NAME:-}"
+_env_KUBECONFIG_PATH_EXPLICIT="${KUBECONFIG_PATH:-}"
 HOST_PROFILE="${HOST_PROFILE:-}"
 
 if [[ -n "$HOST_PROFILE" ]]; then
@@ -46,12 +47,31 @@ ADDONS="${_env_ADDONS:-${ADDONS:-}}"
 # NAME_PREFIX mirrors TF_VAR_name_prefix so flannel-to-cilium.sh finds the right VMs
 NAME_PREFIX="${_env_NAME_PREFIX:-${NAME_PREFIX:-${TF_VAR_name_prefix:-lab}}}"
 
-# KUBECONFIG_PATH default is backend-specific; resolved after BACKEND is final
-if [[ "$BACKEND" == "libvirt" ]]; then
-  KUBECONFIG_PATH="${_env_KUBECONFIG_PATH:-${KUBECONFIG_PATH:-${ROOT_DIR}/kubeconfig.libvirt}}"
-else
-  KUBECONFIG_PATH="${_env_KUBECONFIG_PATH:-${KUBECONFIG_PATH:-${ROOT_DIR}/kubeconfig}}"
+# ENV_NAME identifies the environment for state isolation.
+# Derived from HOST_PROFILE filename when not set explicitly.
+ENV_NAME="${_env_ENV_NAME:-}"
+if [[ -z "$ENV_NAME" && -n "$HOST_PROFILE" ]]; then
+  _profile_base="$(basename "$HOST_PROFILE")"
+  ENV_NAME="${_profile_base%.env*}"
 fi
+
+# STATE_DIR groups all per-environment files: tofu state, kubeconfig, metadata.
+# Enabled only when ENV_NAME is known; otherwise falls back to legacy paths
+# so existing environments without a profile continue to work unchanged.
+if [[ -n "$ENV_NAME" ]]; then
+  STATE_DIR="${ROOT_DIR}/state/${ENV_NAME}"
+  KUBECONFIG_PATH="${_env_KUBECONFIG_PATH_EXPLICIT:-${STATE_DIR}/kubeconfig}"
+else
+  STATE_DIR=""
+  if [[ "$BACKEND" == "libvirt" ]]; then
+    KUBECONFIG_PATH="${_env_KUBECONFIG_PATH_EXPLICIT:-${KUBECONFIG_PATH:-${ROOT_DIR}/kubeconfig.libvirt}}"
+  else
+    KUBECONFIG_PATH="${_env_KUBECONFIG_PATH_EXPLICIT:-${KUBECONFIG_PATH:-${ROOT_DIR}/kubeconfig}}"
+  fi
+fi
+
+# Keep the tofu kubeconfig_path variable in sync so modules write to the right place.
+export TF_VAR_kubeconfig_path="$KUBECONFIG_PATH"
 
 if [[ -f "$KUBECONFIG_PATH" ]]; then
   export KUBECONFIG="$KUBECONFIG_PATH"
@@ -77,9 +97,10 @@ Commands:
 
 Env:
   BACKEND=multipass|libvirt
-  CNI=flannel|cilium|none       CNI for the cluster (default: flannel)
-  ADDONS=                       Space-separated optional addons to auto-install after up
-  HOST_PROFILE=envs/<name>.env  Environment profile (sets BACKEND, CNI, ADDONS, etc.)
+  CNI=flannel|cilium|none         CNI for the cluster (default: flannel)
+  ADDONS=                         Space-separated optional addons to auto-install after up
+  HOST_PROFILE=envs/<name>.env    Environment profile (sets BACKEND, CNI, ADDONS, etc.)
+  ENV_NAME=<name>                 Override the environment name (default: derived from HOST_PROFILE)
   LAB_HOST_MODE=local|remote
   LAB_REMOTE_SSH_TARGET=user@host
   LAB_REMOTE_REPO_PATH=/path/to/infra-lab
@@ -88,6 +109,12 @@ Env:
   TOOL=tofu|terraform
   KUBECONFIG_PATH=/path/to/kubeconfig
   FORCE=1
+
+State isolation (when HOST_PROFILE or ENV_NAME is set):
+  state/<ENV_NAME>/
+    terraform.tfstate   OpenTofu state
+    kubeconfig          Cluster kubeconfig
+    meta                Environment creation metadata
 USAGE
 }
 
@@ -150,7 +177,7 @@ reconcile_multipass_state() {
     fi
 
     echo "[WARN] state has null_resource.${resource_name}[${index_key}] but VM ${vm_name} is missing; tainting for recreation"
-    "$TOOL" taint -allow-missing "null_resource.${resource_name}[${index_key}]" >/dev/null
+    "$TOOL" taint -allow-missing -state="$state_file" "null_resource.${resource_name}[${index_key}]" >/dev/null
     missing=1
   done < <(
     jq -r '
@@ -173,7 +200,7 @@ reconcile_multipass_state() {
 passthrough_env() {
   while IFS='=' read -r name value; do
     case "$name" in
-      BACKEND|CNI|ADDONS|NAME_PREFIX|TOOL|KUBECONFIG_PATH|FORCE|ALLOW_LOCAL_VM|BLOCKED_LOCAL_TS_IP|VM_USER|TF_VAR_*)
+      BACKEND|CNI|ADDONS|ENV_NAME|NAME_PREFIX|TOOL|KUBECONFIG_PATH|FORCE|ALLOW_LOCAL_VM|BLOCKED_LOCAL_TS_IP|VM_USER|TF_VAR_*)
         printf '%s=%q ' "$name" "$value"
         ;;
     esac
@@ -182,7 +209,11 @@ passthrough_env() {
 
 write_env_meta() {
   local meta_file git_commit git_branch
-  meta_file="${KUBECONFIG_PATH}.meta"
+  if [[ -n "$STATE_DIR" ]]; then
+    meta_file="${STATE_DIR}/meta"
+  else
+    meta_file="${KUBECONFIG_PATH}.meta"
+  fi
 
   git_commit="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
   git_branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
@@ -190,11 +221,13 @@ write_env_meta() {
   cat > "$meta_file" <<EOF
 infra_lab_git_commit=${git_commit}
 infra_lab_git_branch=${git_branch}
+env_name=${ENV_NAME}
 backend=${BACKEND}
 cni=${CNI}
 name_prefix=${NAME_PREFIX}
 addons=${ADDONS}
 kubeconfig=${KUBECONFIG_PATH}
+state_dir=${STATE_DIR}
 created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 
@@ -277,14 +310,21 @@ case "$cmd" in
   up)
     ensure_local_vm_allowed
     need_cmd "$TOOL"
+    [[ -n "$STATE_DIR" ]] && mkdir -p "$STATE_DIR"
     (
       cd "$(backend_dir)"
+      _state_args=()
+      [[ -n "$STATE_DIR" ]] && _state_args=("-state=${STATE_DIR}/terraform.tfstate")
       "$TOOL" init
       if [[ "$BACKEND" == "multipass" ]]; then
-        reconcile_multipass_state "$(pwd)/terraform.tfstate"
+        if [[ -n "$STATE_DIR" ]]; then
+          reconcile_multipass_state "${STATE_DIR}/terraform.tfstate"
+        else
+          reconcile_multipass_state "$(pwd)/terraform.tfstate"
+        fi
       fi
-      "$TOOL" plan
-      "$TOOL" apply -auto-approve
+      "$TOOL" plan "${_state_args[@]}"
+      "$TOOL" apply -auto-approve "${_state_args[@]}"
     )
     if [[ "$AUTO_INSTALL_BASE_ADDONS" == "1" ]]; then
       echo "[INFO] install default base add-ons"
@@ -316,7 +356,9 @@ case "$cmd" in
     need_cmd "$TOOL"
     (
       cd "$(backend_dir)"
-      "$TOOL" destroy -auto-approve
+      _state_args=()
+      [[ -n "$STATE_DIR" ]] && _state_args=("-state=${STATE_DIR}/terraform.tfstate")
+      "$TOOL" destroy -auto-approve "${_state_args[@]}"
     )
     ;;
   status)
@@ -342,11 +384,16 @@ case "$cmd" in
       echo "FORCE=1 is required to clean local state files" >&2
       exit 1
     fi
-    (
-      cd "$(backend_dir)"
-      rm -rf .terraform terraform.tfstate* tofu.tfstate* tofu.tfstate.d
-      rm -f "$KUBECONFIG_PATH" "${KUBECONFIG_PATH}.meta"
-    )
+    if [[ -n "$STATE_DIR" ]]; then
+      rm -rf "${STATE_DIR}"
+      echo "[INFO] state directory removed: ${STATE_DIR}"
+    else
+      (
+        cd "$(backend_dir)"
+        rm -rf .terraform terraform.tfstate* tofu.tfstate* tofu.tfstate.d
+        rm -f "$KUBECONFIG_PATH" "${KUBECONFIG_PATH}.meta"
+      )
+    fi
     ;;
   addons-install)
     bash "${ROOT_DIR}/addons/manage.sh" install "$@"
