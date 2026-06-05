@@ -43,8 +43,20 @@ func runEnvList(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	if len(envs) == 0 {
-		fmt.Println("no environments found in state/")
-		fmt.Println("hint: run 'HOST_PROFILE=envs/<name>.env make env-up' to create one")
+		fmt.Println("No managed environments found under state/")
+		fmt.Println()
+		if legacy := lab.DetectLegacyFiles(root); len(legacy) > 0 {
+			fmt.Println("Legacy files detected (pre-Phase-2 environment):")
+			for _, f := range legacy {
+				fmt.Println("  " + f)
+			}
+			fmt.Println()
+			fmt.Println("These will not be modified automatically.")
+			fmt.Println("Create a new managed environment with:")
+			fmt.Println("  HOST_PROFILE=envs/<name>.env make env-up")
+		} else {
+			fmt.Println("hint: run 'HOST_PROFILE=envs/<name>.env make env-up' to create one")
+		}
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)

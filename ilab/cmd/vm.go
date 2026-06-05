@@ -10,6 +10,8 @@ import (
 	"github.com/HeaInSeo/infra-lab/ilab/internal/lab"
 )
 
+var vmListAll bool
+
 var vmCmd = &cobra.Command{
 	Use:   "vm",
 	Short: "VM operations",
@@ -36,6 +38,7 @@ var vmSSHCmd = &cobra.Command{
 }
 
 func init() {
+	vmListCmd.Flags().BoolVar(&vmListAll, "all", false, "include unmanaged VMs from all backends")
 	vmCmd.AddCommand(vmListCmd)
 	vmCmd.AddCommand(vmVersionCmd)
 	vmCmd.AddCommand(vmSSHCmd)
@@ -46,6 +49,12 @@ func runVMList(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	if vmListAll {
+		return runVMListAll(root)
+	}
+
+	// Default: managed VMs only, grouped by environment.
 	envs, err := lab.ListEnvs(root)
 	if err != nil {
 		return err
@@ -66,7 +75,30 @@ func runVMList(_ *cobra.Command, _ []string) error {
 		}
 	}
 	if !found {
+		fmt.Fprintln(w, "(no managed VMs found; use --all to see unmanaged VMs)")
+	}
+	return w.Flush()
+}
+
+func runVMListAll(root string) error {
+	vms, err := lab.ListAllVMs(root)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "VM\tMANAGED\tENV\tSTATE\tIPv4")
+	if len(vms) == 0 {
 		fmt.Fprintln(w, "(no VMs found)")
+	}
+	for _, vm := range vms {
+		managed := "no"
+		envName := "-"
+		if vm.Managed {
+			managed = "yes"
+			envName = vm.EnvName
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			vm.Name, managed, envName, vm.State, vm.IPv4)
 	}
 	return w.Flush()
 }

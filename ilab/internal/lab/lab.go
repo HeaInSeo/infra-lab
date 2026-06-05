@@ -54,9 +54,11 @@ type Env struct {
 
 // VMInfo holds status information for a single VM.
 type VMInfo struct {
-	Name  string
-	State string
-	IPv4  string
+	Name    string
+	State   string
+	IPv4    string
+	Managed bool   // true if the VM belongs to a known infra-lab env
+	EnvName string // env name if Managed, otherwise empty
 }
 
 // BuildInfo mirrors /etc/infra-lab/build.json written by write-build-json.sh.
@@ -226,6 +228,42 @@ func PrintK8sStatus(root, envName string) error {
 	fmt.Println()
 	fmt.Println("== Pods ==")
 	return runKubectl(kubeconfig, "get", "pods", "-A", "-o", "wide")
+}
+
+// DetectLegacyFiles returns paths of pre-Phase-2 state files found in root.
+func DetectLegacyFiles(root string) []string {
+	candidates := []string{
+		"kubeconfig", "kubeconfig.libvirt",
+		"terraform.tfstate", "tofu.tfstate",
+	}
+	var found []string
+	for _, f := range candidates {
+		if _, err := os.Stat(filepath.Join(root, f)); err == nil {
+			found = append(found, "./"+f)
+		}
+	}
+	return found
+}
+
+// ListAllVMs returns every VM from the backend, annotated with managed status.
+// Currently supports multipass only; other backends return an empty slice.
+func ListAllVMs(root string) ([]VMInfo, error) {
+	envs, _ := ListEnvs(root) // ignore error — treat as no envs
+
+	vms, err := listMultipassVMs("") // empty prefix = no filtering
+	if err != nil {
+		return nil, err
+	}
+	for i, vm := range vms {
+		for _, e := range envs {
+			if strings.HasPrefix(vm.Name, e.NamePrefix+"-") {
+				vms[i].Managed = true
+				vms[i].EnvName = e.Name
+				break
+			}
+		}
+	}
+	return vms, nil
 }
 
 // Print writes formatted build info as a key-value table.

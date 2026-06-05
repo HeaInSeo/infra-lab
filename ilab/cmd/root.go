@@ -28,4 +28,5 @@ func init() {
 	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(vmCmd)
 	rootCmd.AddCommand(k8sCmd)
+	rootCmd.AddCommand(doctorCmd)
 }
