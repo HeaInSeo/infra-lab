@@ -19,13 +19,26 @@ render_args_patch() {
   printf '[{"op":"replace","path":"/spec/template/spec/containers/0/args","value":[%s]}]' "$joined"
 }
 
+DEFAULT_ARGS=(
+  "--cert-dir=/tmp"
+  "--secure-port=10250"
+  "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname"
+  "--kubelet-use-node-status-port"
+  "--metric-resolution=15s"
+)
+
 echo "[INFO] install base addon: metrics-server ${METRICS_SERVER_VERSION}"
 kubectl apply -f "https://github.com/kubernetes-sigs/metrics-server/releases/download/${METRICS_SERVER_VERSION}/components.yaml"
 mapfile -t current_args < <(kubectl -n kube-system get deployment metrics-server -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{.}{"\n"}{end}')
 
+# fall back to known-good defaults when mapfile gets empty output (non-interactive SSH sessions)
+if [[ ${#current_args[@]} -eq 0 ]] || [[ -z "${current_args[0]:-}" ]]; then
+  current_args=("${DEFAULT_ARGS[@]}")
+fi
+
 filtered_args=()
 for arg in "${current_args[@]}"; do
-  if [[ "$arg" != "--kubelet-insecure-tls" ]]; then
+  if [[ -n "$arg" ]] && [[ "$arg" != "--kubelet-insecure-tls" ]]; then
     filtered_args+=("$arg")
   fi
 done
