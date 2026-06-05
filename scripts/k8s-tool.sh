@@ -281,7 +281,8 @@ case "$cmd" in
       fi
     fi
     if [[ -n "$ADDONS" ]]; then
-      for addon in $ADDONS; do
+      read -ra _addon_list <<< "$ADDONS"
+      for addon in "${_addon_list[@]}"; do
         echo "[INFO] install optional addon: ${addon}"
         bash "${ROOT_DIR}/addons/manage.sh" install optional "${addon}"
         bash "${ROOT_DIR}/addons/manage.sh" verify optional "${addon}"
