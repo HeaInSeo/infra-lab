@@ -207,6 +207,30 @@ passthrough_env() {
   done < <(env)
 }
 
+_write_vm_build_json() {
+  local _commit _branch _runtime
+  _commit="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+  _branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+
+  case "$BACKEND" in
+    multipass) _runtime=multipass ;;
+    libvirt)   _runtime=ssh ;;
+    *)         _runtime="" ;;
+  esac
+
+  if [[ -z "$_runtime" ]]; then
+    echo "[INFO] build.json: unsupported backend ${BACKEND}, skipping" >&2
+    return
+  fi
+
+  echo "[INFO] writing /etc/infra-lab/build.json to all VMs"
+  VM_RUNTIME="$_runtime" \
+  INFRA_LAB_GIT_COMMIT="$_commit" \
+  INFRA_LAB_GIT_BRANCH="$_branch" \
+  bash "${ROOT_DIR}/scripts/cluster/write-build-json.sh" || \
+    echo "[WARN] build.json write failed (non-fatal); run scripts/cluster/write-build-json.sh manually" >&2
+}
+
 write_env_meta() {
   local meta_file git_commit git_branch
   if [[ -n "$STATE_DIR" ]]; then
@@ -326,6 +350,7 @@ case "$cmd" in
       "$TOOL" plan "${_state_args[@]}"
       "$TOOL" apply -auto-approve "${_state_args[@]}"
     )
+    _write_vm_build_json
     if [[ "$AUTO_INSTALL_BASE_ADDONS" == "1" ]]; then
       echo "[INFO] install default base add-ons"
       bash "${ROOT_DIR}/addons/manage.sh" install base
