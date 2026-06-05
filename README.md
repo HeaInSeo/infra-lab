@@ -1,244 +1,256 @@
 # infra-lab
 
-한국어: [README.md](README.md)
-English: [README.en.md](README.en.md)
+Korean: [README.ko.md](README.ko.md)
 
-`infra-lab`은 로컬 및 워크스테이션급 PoC 작업을 위한 재사용 가능한 VM 기반 Kubernetes 랩 베이스라인입니다. 현재 베이스라인은 의도적으로 범위를 좁게 유지합니다. OpenTofu + kubeadm 조합을 기준으로, 현재는 Multipass 와 libvirt 두 가지 VM backend 를 수용하는 방향으로 확장 중입니다.
+A reusable VM-based Kubernetes lab for local and workstation-grade work.
+Manages cluster lifecycle across `multipass` and `libvirt` backends using OpenTofu + kubeadm.
+Includes `ilab` — a read-only CLI for inspecting environments, VMs, and cluster state.
 
-이 저장소는 단일 프로젝트용 환경이 아닙니다. node-local artifact 및 스토리지 흐름, DaemonSet 스타일 노드 에이전트, same-node 재사용과 cross-node fetch 비교, Cilium 및 네트워킹 실험, 스토리지 테스트, 오퍼레이터 검증 등 앞으로의 다양한 Kubernetes 실험을 위한 공용 랩 인프라 기반입니다.
+[![CI](https://github.com/HeaInSeo/infra-lab/actions/workflows/check.yml/badge.svg)](https://github.com/HeaInSeo/infra-lab/actions/workflows/check.yml)
 
-## 정체성
+## What this repo owns
 
-- 목적: 범용 K8s VM 랩 인프라
-- 현재 베이스라인: Ubuntu 24.04 게스트 + OpenTofu + kubeadm
-- 첫 번째 목표 형태: `1 control-plane + 2 workers`인 3 VM
-- 라이프사이클 지원: 호스트 준비, 클러스터 up/down, 상태 확인, 로컬 정리
-- backend 모델: `multipass`, `libvirt`
-- 애드온 모델: `base`와 `optional`
-- 향후 확장 지점: 이 저장소를 워크로드 저장소로 바꾸지 않으면서 `profiles/`를 통한 프로젝트별 오버레이 지원
+- VM lifecycle for a kubeadm cluster through the selected backend
+- Cluster bootstrap, kubeconfig export, and base addon installation
+- Per-environment state isolation under `state/<env>/`
+- `ilab` CLI for environment inspection
+- CI quality gates: shell, HCL, YAML, Go
 
-## 이 저장소가 담당하는 것
+## What this repo does not own
 
-- 선택된 backend 를 통한 kubeadm 기반 랩 클러스터 VM 라이프사이클
-- 베이스라인 클러스터 부트스트랩과 kubeconfig 내보내기
-- 반복 가능한 로컬 랩 사용을 위한 소규모 운영 스크립트
-- 클러스터 인프라 기능을 위한 최소 애드온 계층
-- 범위, 진입점, 베이스라인 운영 모델에 대한 문서
+- Application or workload deployment
+- Production hardening or production cluster provisioning
+- Deep project-specific configuration embedded in the main repo
 
-## 이 저장소가 담당하지 않는 것
+## Quick start
 
-- 특정 프로젝트의 애플리케이션 배포
-- artifact-agent, catalog, storage app, Cilium 자체 구현
-- 프로덕션 클러스터 프로비저닝 또는 프로덕션 수준 하드닝
-- 메인 저장소에 깊게 결합된 프로젝트 전용 워크로드
-
-자세한 내용: [docs/LAB_SCOPE.ko.md](docs/LAB_SCOPE.ko.md)
-
-운영 표준 명령과 host profile 기준은 [docs/OPERATIONS.ko.md](docs/OPERATIONS.ko.md)에 정리했습니다.
-
-`remote-seoy` Cilium 운영 기준선과 read-only 검증 절차는 [profiles/remote-seoy/cilium/README.ko.md](profiles/remote-seoy/cilium/README.ko.md)에 정리했습니다.
-프로젝트 전체 상세 설명은 [docs/PROJECT_GUIDE.ko.md](docs/PROJECT_GUIDE.ko.md), `remote-seoy` Cilium 상세 설명은 [docs/CILIUM_REMOTE_SEOY.ko.md](docs/CILIUM_REMOTE_SEOY.ko.md)에 정리했습니다.
-
-## 빠른 시작
-
-1. 호스트를 준비합니다.
+### 1. Pick an environment profile
 
 ```bash
-./scripts/k8s-tool.sh host-setup
+cp envs/multipass-flannel.env.example envs/multipass-flannel.env
+# For libvirt, fill in TF_VAR_ssh_private_key_path and TF_VAR_ssh_public_key
+cp envs/libvirt-cilium.env.example envs/libvirt-cilium.env
 ```
 
-원격 랩 호스트에서 실행하려면 기본 host profile 을 지정할 수 있습니다.
+Profiles live in `envs/` and set `BACKEND`, `CNI`, `ADDONS`, and any backend-specific `TF_VAR_*` values.
+They are gitignored — only `.env.example` files are committed.
+
+### 2. Prepare the host
 
 ```bash
-HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh status
+HOST_PROFILE=envs/multipass-flannel.env ./scripts/k8s-tool.sh host-setup
 ```
 
-기본 운영 프로파일은 이미 [hosts/remote-lab.env](hosts/remote-lab.env)로 추가되어 있습니다. 다른 환경용 프로파일이 필요하면 [hosts/remote-lab.env.example](hosts/remote-lab.env.example)을 복사해 별도 파일로 조정하면 됩니다.
-
-2. 기본값을 확인합니다.
+### 3. Create the cluster
 
 ```bash
-sed -n '1,200p' dev.auto.tfvars
+ENV_PROFILE=envs/multipass-flannel.env make env-up
+# or directly:
+HOST_PROFILE=envs/multipass-flannel.env ./scripts/k8s-tool.sh up
 ```
 
-3. backend 를 선택해 베이스라인 클러스터를 생성합니다.
-
-```bash
-./scripts/k8s-tool.sh up
-BACKEND=libvirt ./scripts/k8s-tool.sh up
+State is isolated under `state/multipass-flannel/`:
+```
+state/multipass-flannel/
+  terraform.tfstate   ← OpenTofu state
+  kubeconfig          ← cluster access
+  meta                ← creation metadata (git commit, backend, CNI, timestamp)
 ```
 
-`dev.auto.tfvars`에서 `name_prefix`, `masters`, `workers`, `vm_user`, VM 스펙을 바꾼 뒤 다시 `up`을 실행하면 OpenTofu가 변경분을 기준으로 재적용합니다.
-libvirt backend 는 `TF_VAR_ssh_private_key_path`, `TF_VAR_ssh_public_key` 같은 추가 변수가 필요합니다.
-`qemu:///system`을 쓰는 libvirt backend 는 호스트 사용자에게 libvirt 관리 권한이 없으면 `sudo`가 필요할 수 있습니다.
-
-4. 상태를 확인합니다.
+### 4. Check status
 
 ```bash
-./scripts/k8s-tool.sh status
+ENV_PROFILE=envs/multipass-flannel.env make env-status
+# or via ilab:
+ilab env status
+ilab k8s status
 ```
 
-5. base 애드온을 확인합니다.
+### 5. Tear down
 
 ```bash
-./scripts/k8s-tool.sh addons-verify
+ENV_PROFILE=envs/multipass-flannel.env make env-down
+FORCE=1 ENV_PROFILE=envs/multipass-flannel.env make env-clean
 ```
 
-`up`은 기본적으로 base 애드온인 `metrics-server`까지 자동 설치합니다. `addons-verify`는 이제 base 애드온이 실제로 설치되어 있어야 통과합니다. 특정 optional 항목만 확인하려면 `./scripts/k8s-tool.sh addons-verify optional cilium`처럼 범위를 지정하면 됩니다.
+## Backends
 
-현재 랩 베이스라인의 kubelet 인증서 형태 때문에 `metrics-server`는 설치 시 `--kubelet-insecure-tls`를 함께 적용합니다.
+| Backend | Notes |
+|---------|-------|
+| `multipass` | Recommended for initial setup. Requires Multipass on the host. |
+| `libvirt` | Requires `virsh`, `qemu-img`, libvirt access, and SSH key variables. |
 
-`remote-seoy` Cilium baseline을 read-only로 점검하려면:
+### Backend-specific variables
 
+**multipass** — no extra variables required beyond the profile.
+
+**libvirt** — set in the profile or environment:
 ```bash
-HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-cilium-verify
-HOST_PROFILE=hosts/remote-lab.env ./scripts/k8s-tool.sh profile-gateway-verify
+TF_VAR_ssh_private_key_path=/home/you/.ssh/id_ed25519
+TF_VAR_ssh_public_key=ssh-ed25519 AAAA...
 ```
 
-6. 종료합니다.
+## CNI
+
+Set `CNI=` in the environment profile:
+
+| Value | Behavior |
+|-------|----------|
+| `flannel` | Default. Installed during cluster bootstrap. |
+| `cilium` | Flannel is installed first, then `flannel-to-cilium.sh` migration runs automatically after `up`. Only supported with `multipass` backend currently. |
+
+## ilab CLI
+
+A read-only operator interface that inspects infra-lab environments without managing state itself.
 
 ```bash
-./scripts/k8s-tool.sh down
+make build        # → bin/ilab
+make install      # → $(go env GOPATH)/bin/ilab
 ```
 
-7. 로컬 상태 파일을 제거합니다.
+Source of truth remains the OpenTofu state, VMs, and Kubernetes API.
+`ilab` only reads.
+
+### Commands
 
 ```bash
-FORCE=1 ./scripts/k8s-tool.sh clean
+ilab doctor                     # diagnose current environment state
+ilab env list                   # list environments from state/
+ilab env status [env]           # show cluster/VM status
+ilab vm list                    # list managed VMs
+ilab vm list --all              # list all VMs including unmanaged
+ilab vm version <vm>            # read /etc/infra-lab/build.json from VM
+ilab vm ssh <vm>                # open interactive shell (multipass shell)
+ilab k8s status [env]           # kubectl nodes + pods
 ```
 
-## 베이스라인 실행 흐름
+`ilab` walks up from the current directory to find the repo root automatically.
+Override with `INFRA_LAB_ROOT=/path/to/infra-lab`.
 
-### 호스트 설정
+### VM build metadata
 
-```bash
-./scripts/k8s-tool.sh host-setup
+Each VM receives `/etc/infra-lab/build.json` after `env-up`:
+
+```json
+{
+  "schemaVersion": "infra-lab.vm.v1",
+  "infraLabGitCommit": "abc1234",
+  "infraLabGitBranch": "main",
+  "envName": "multipass-flannel",
+  "backend": "multipass",
+  "cni": "flannel",
+  "role": "control-plane",
+  "nodeName": "lab-master-0",
+  "kubernetesVersion": "v1.32.5",
+  "createdAt": "2026-06-05T00:00:00Z"
+}
 ```
 
-backend 별 호스트 설정:
+`ilab vm version <node>` reads this file to show which infra-lab version and configuration built the VM.
 
-- `BACKEND=multipass`: OpenTofu, Python 3, Multipass 중심 준비 스크립트
-- `BACKEND=libvirt`: libvirt/virsh/qemu-img 접근 가능 여부 검증
+## Addons
 
-현재 host setup 스크립트는 Rocky/RHEL 계열 호스트를 우선 기준으로 다룹니다.
+Addons are separated into two categories.
 
-### 클러스터 생성
+### Base (auto-installed after `up`)
 
-```bash
-./scripts/k8s-tool.sh up
-```
+- `metrics-server` — installed with `--kubelet-insecure-tls` for this lab's certificate shape
 
-수행 내용:
+### Optional (explicit install)
 
-- backend 상태 디렉터리에서 OpenTofu 초기화 및 리소스 적용
-- 선택된 backend 로 Ubuntu 24.04 게스트 생성
-- 첫 control-plane 노드에서 `kubeadm init` 실행
-- worker 노드 조인
-- 조인된 모든 노드가 `Ready` 상태가 될 때까지 대기
-- 실행 host 에 kubeconfig 내보내기
-
-### 상태 확인
+- `local-path-storage` — pinned to v0.0.28
+- `metallb` — review `addons/values/metallb/ipaddresspool.yaml` before use
+- `cilium` — install via the migration path (`CNI=cilium` in profile), not directly via addon install
 
 ```bash
-./scripts/k8s-tool.sh status
-```
-
-`./kubeconfig`가 존재하고 `kubectl`이 있으면 노드 및 파드 상태를 출력합니다. 그렇지 않으면 backend 에 따라 `multipass list` 또는 `virsh list --all`로 폴백합니다.
-
-### 종료
-
-```bash
-./scripts/k8s-tool.sh down
-```
-
-VM과 OpenTofu가 관리하는 관련 로컬 리소스를 제거합니다.
-
-### 정리
-
-```bash
-FORCE=1 ./scripts/k8s-tool.sh clean
-```
-
-`.terraform/`, `*.tfstate`, `./kubeconfig` 같은 로컬 상태 파일을 제거합니다. 호스트 패키지는 제거하지 않습니다.
-
-## 애드온
-
-이 저장소는 인프라 애드온을 두 범주로 구분합니다.
-
-### Base
-
-Base 애드온은 랩 클러스터의 합리적인 기본값이며 특정 PoC에 저장소를 종속시키지 않습니다. 현재는 `up` 이후 자동으로 설치되는 기본 베이스라인으로 취급합니다.
-
-- `metrics-server`
-
-### Optional
-
-Optional 애드온은 특정 랩 형태에서 유용하지만 항상 켜 두기보다는 명시적으로 설치해야 하는 항목입니다.
-
-- `local-path-storage`
-- `metallb`
-
-예시:
-
-```bash
-./scripts/k8s-tool.sh addons-install base
 ./scripts/k8s-tool.sh addons-install optional local-path-storage
-./scripts/k8s-tool.sh addons-install optional metallb
-./scripts/k8s-tool.sh addons-verify
-./scripts/k8s-tool.sh addons-verify optional metallb
+./scripts/k8s-tool.sh addons-verify optional local-path-storage
 ```
 
-`addons-install base`는 기본적으로 자동 설치된 base 애드온을 복구하거나 다시 적용할 때 사용합니다.
+## Makefile reference
 
-`metallb`를 사용하기 전에 [addons/values/metallb/ipaddresspool.yaml](addons/values/metallb/ipaddresspool.yaml)을 검토해야 합니다.
+```bash
+# Lint
+make check          # shell + yaml + hcl (default)
+make lint-shell     # bash -n + shellcheck
+make lint-yaml      # YAML parse
+make lint-hcl       # tofu fmt + tofu validate
+make lint-go        # gofmt + go vet + go build
+make test-go        # go test ./...
 
-## 디렉터리 구성
+# Environment
+ENV_PROFILE=envs/<name>.env make env-up
+ENV_PROFILE=envs/<name>.env make env-down
+ENV_PROFILE=envs/<name>.env make env-status
+FORCE=1 ENV_PROFILE=envs/<name>.env make env-clean
 
-```text
+# CLI
+make build          # bin/ilab
+make install        # GOPATH/bin/ilab
+```
+
+## Directory layout
+
+```
 .
-├── addons/
+├── addons/            # base/ and optional/ addon scripts
 │   ├── base/
 │   ├── optional/
-│   ├── values/
-│   └── manage.sh
+│   └── values/
 ├── backends/
-│   └── libvirt/
-├── cloud-init/
+│   └── libvirt/       # libvirt-specific Terraform modules
+├── bin/               # built binaries (gitignored)
+├── cloud-init/        # VM bootstrap cloud-init config
 ├── docs/
-├── hosts/
-├── profiles/
+├── envs/              # environment profiles (*.env.example committed, *.env gitignored)
+├── ilab/              # Go CLI source (module: github.com/HeaInSeo/infra-lab/ilab)
+├── profiles/          # project-specific overlays and baselines
 ├── scripts/
-│   ├── runtime/
-│   ├── host/
+│   ├── cluster/       # cluster-init, join-all, flannel-to-cilium, write-build-json
+│   ├── host/          # host setup and cleanup
 │   ├── multipass/
-│   ├── cluster/
-│   └── k8s-tool.sh
+│   ├── runtime/       # lib.sh, run-remote.sh
+│   └── k8s-tool.sh   # main entrypoint
+├── state/             # per-environment runtime state (gitignored)
+│   └── <env>/
+│       ├── terraform.tfstate
+│       ├── kubeconfig
+│       └── meta
 ├── main.tf
 ├── variables.tf
 ├── versions.tf
 └── dev.auto.tfvars
 ```
 
-## `mac-k8s-multipass-terraform`과 다른 이유
+## State isolation
 
-이 저장소는 이전 프로젝트를 참고하지만 서비스 지향 범위를 그대로 가져오지는 않습니다. 기존 저장소는 클러스터 베이스라인 작업과 서비스 설치 흔적, 더 넓은 스택 애드온이 섞여 있었습니다. 이 저장소는 VM과 kubeadm 라이프사이클 패턴은 유지하면서도 책임 범위를 재사용 가능한 랩 인프라로 다시 좁혔습니다.
+When `HOST_PROFILE` or `ENV_NAME` is set, all per-environment files are isolated under `state/<env>/`.
+Without a profile, state falls back to the backend directory (backward compatible with pre-Phase-2 environments).
 
-## 향후 방향
+```bash
+# New: isolated under state/multipass-flannel/
+HOST_PROFILE=envs/multipass-flannel.env ./scripts/k8s-tool.sh up
 
-- 대체 네트워킹 프로필로서 Cilium
-- 로컬 스토리지 및 local PV 실험용 헬퍼
-- node-local agent 실험용 헬퍼
-- operator 검증 프로필
-- `profiles/` 또는 향후 `labs/` 규칙 아래의 프로젝트 오버레이
+# Legacy: state in backend directory root (unchanged)
+./scripts/k8s-tool.sh up
+```
 
-## 참고
+`ilab doctor` detects both states and explains which files exist and what to do next.
 
-- 첫 번째 베이스라인에서는 빠른 부트스트랩을 위해 기본 CNI로 Flannel을 사용합니다.
-- Cilium은 의도적으로 향후 프로필 또는 선택적 경로로 미뤘으며, 베이스라인에 강제로 포함하지 않습니다.
-- 현재 환경에서 공개 Multipass 이미지 카탈로그가 Ubuntu 중심이기 때문에 게스트 베이스라인은 Ubuntu 24.04를 사용합니다.
-- libvirt backend 는 `default` 네트워크의 DHCP lease 를 사용하며, guest network interface 이름을 고정하지 않습니다.
-- 2026-04-30 기준 `100.123.80.48`에서 libvirt backend 를 `1 control-plane + 2 workers`까지 실기동 검증했습니다.
-- 호스트 헬퍼 스크립트는 여전히 기존 Rocky 8 워크스테이션 설정 흐름을 기준으로 하고 있습니다.
-- host / backend / transport 분리 배경은 [docs/ARCHITECTURE.ko.md](docs/ARCHITECTURE.ko.md)에 정리했습니다.
-- 이전 Rocky 8 경로도 이번 스프린트에서 봤던 것과 같은 종류의 control-plane 불안정을 겪을 수 있습니다. static pod가 반복 재생성되거나 API server가 불안정하면 `etcd`나 `kube-apiserver` 매니페스트를 먼저 바꾸기 전에 `containerd --version`, `systemctl show -p ExecStart containerd`, `/etc/containerd/config.toml`, `crictl info`, kubelet `cgroupDriver`를 확인하십시오.
-- 실제 장애 흐름과 회복 순서는 [docs/TROUBLESHOOTING_HISTORY.ko.md](docs/TROUBLESHOOTING_HISTORY.ko.md)에 정리했습니다.
+## Reproducibility
+
+- Kubernetes packages pinned to `1.32.5` in `cloud-init/k8s.yaml`
+- `local-path-storage` pinned to `v0.0.28`
+- Provider versions locked in `.terraform.lock.hcl` (committed)
+- Ubuntu 24.04 LTS guest image
+
+## CI
+
+Two GitHub Actions workflows run on every push and pull request:
+
+| Workflow | Jobs |
+|----------|------|
+| `check` | Shell (shellcheck), OpenTofu (fmt + validate), YAML (parse), Go (gofmt + vet + build + test) |
+| `workflow-lint` | actionlint, no `ubuntu-latest` |
+
+Runners are pinned to `ubuntu-24.04`. Dependabot updates Actions versions monthly.
