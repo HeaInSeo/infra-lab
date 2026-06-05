@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,6 +146,8 @@ func (e *Env) ListVMs() ([]VMInfo, error) {
 	switch e.Backend {
 	case "multipass":
 		return listMultipassVMs(e.NamePrefix)
+	case "libvirt":
+		return listLibvirtVMs(e.NamePrefix)
 	default:
 		return nil, fmt.Errorf("vm list not implemented for backend %q", e.Backend)
 	}
@@ -155,6 +158,9 @@ func (e *Env) ReadBuildJSON(vmName string) (*BuildInfo, error) {
 	switch e.Backend {
 	case "multipass":
 		return readBuildJSONMultipass(vmName)
+	case "libvirt":
+		ip := libvirtVMIP(vmName)
+		return readBuildJSONSSH("ubuntu", ip, vmName)
 	default:
 		return nil, fmt.Errorf("vm version not implemented for backend %q", e.Backend)
 	}
@@ -165,6 +171,17 @@ func (e *Env) SSH(vmName string) error {
 	switch e.Backend {
 	case "multipass":
 		cmd := exec.Command("multipass", "shell", vmName)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	case "libvirt":
+		ip := libvirtVMIP(vmName)
+		if ip == "" {
+			return fmt.Errorf("VM %q: not found or no IP address", vmName)
+		}
+		cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no",
+			"-o", "UserKnownHostsFile=/dev/null", "ubuntu@"+ip)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -245,15 +262,19 @@ func DetectLegacyFiles(root string) []string {
 	return found
 }
 
-// ListAllVMs returns every VM from the backend, annotated with managed status.
-// Currently supports multipass only; other backends return an empty slice.
+// ListAllVMs returns every VM from all supported backends, annotated with managed status.
 func ListAllVMs(root string) ([]VMInfo, error) {
 	envs, _ := ListEnvs(root) // ignore error — treat as no envs
 
-	vms, err := listMultipassVMs("") // empty prefix = no filtering
-	if err != nil {
-		return nil, err
+	var vms []VMInfo
+
+	if mp, err := listMultipassVMs(""); err == nil {
+		vms = append(vms, mp...)
 	}
+	if lv, err := listLibvirtVMs(""); err == nil {
+		vms = append(vms, lv...)
+	}
+
 	for i, vm := range vms {
 		for _, e := range envs {
 			if strings.HasPrefix(vm.Name, e.NamePrefix+"-") {
@@ -353,6 +374,77 @@ func runKubectl(kubeconfig string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// listLibvirtVMs uses virsh to enumerate VMs, optionally filtered by name prefix.
+func listLibvirtVMs(prefix string) ([]VMInfo, error) {
+	out, err := exec.Command("virsh", "list", "--all", "--name").Output()
+	if err != nil {
+		return nil, fmt.Errorf("virsh list: %w", err)
+	}
+	var vms []VMInfo
+	for _, name := range strings.Fields(string(out)) {
+		if name == "" {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(name, prefix+"-") {
+			continue
+		}
+		stOut, _ := exec.Command("virsh", "domstate", name).Output()
+		state := strings.TrimSpace(string(stOut))
+		if state == "" {
+			state = "unknown"
+		}
+		ip := libvirtVMIP(name)
+		vms = append(vms, VMInfo{Name: name, State: state, IPv4: ip})
+	}
+	return vms, nil
+}
+
+// libvirtVMIP returns the first IPv4 address of a libvirt VM via DHCP lease lookup.
+func libvirtVMIP(vmName string) string {
+	out, err := exec.Command("virsh", "domifaddr", vmName).Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, "ipv4") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		addr, _, _ := strings.Cut(fields[3], "/")
+		if net.ParseIP(addr) != nil {
+			return addr
+		}
+	}
+	return ""
+}
+
+// readBuildJSONSSH reads /etc/infra-lab/build.json from a VM via SSH.
+func readBuildJSONSSH(user, ip, vmName string) (*BuildInfo, error) {
+	if ip == "" {
+		return nil, fmt.Errorf("VM %q: cannot determine IP address", vmName)
+	}
+	out, err := exec.Command(
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=5",
+		user+"@"+ip,
+		"cat", "/etc/infra-lab/build.json",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("VM %q: cannot read build.json — was it created with infra-lab env-up?", vmName)
+	}
+	var info BuildInfo
+	if err := json.Unmarshal(out, &info); err != nil {
+		return nil, fmt.Errorf("parse build.json from %q: %w", vmName, err)
+	}
+	return &info, nil
 }
 
 func resolveKubeconfig(root, envName string) (string, error) {
