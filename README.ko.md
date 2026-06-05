@@ -223,6 +223,8 @@ make install        # GOPATH/bin/ilab
 
 `ilab doctor`로 현재 상태를 진단하고 다음 단계를 안내받을 수 있다.
 
+K8sGPT CLI 기반 클러스터 진단 절차는 [docs/K8SGPT_CLI_REMOTE_DIAGNOSIS.ko.md](docs/K8SGPT_CLI_REMOTE_DIAGNOSIS.ko.md)를 참고한다.
+
 ## 재현성
 
 - Kubernetes 패키지: `cloud-init/k8s.yaml`에서 `1.32.5` 고정
