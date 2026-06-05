@@ -22,6 +22,51 @@ Includes `ilab` — a read-only CLI for inspecting environments, VMs, and cluste
 - Production hardening or production cluster provisioning
 - Deep project-specific configuration embedded in the main repo
 
+## Prerequisites
+
+Run `ilab doctor` at any time to verify the current state of your host.
+
+### Common (all paths)
+
+| Tool | Min version | Verify | Installed by |
+|------|-------------|--------|--------------|
+| bash | 4.0 | `bash --version` | OS |
+| git | any | `git --version` | OS / manual |
+| tofu | 1.6 | `tofu version` | `make host-setup` (Rocky) |
+| kubectl | 1.28+ | `kubectl version --client` | `make host-setup` (Rocky) |
+| python3 | 3.6+ | `python3 --version` | `make host-setup` (Rocky) |
+
+### multipass backend
+
+| Tool | Verify | Installed by |
+|------|--------|--------------|
+| multipass | `multipass version` | `./scripts/k8s-tool.sh host-setup` |
+| jq | `jq --version` | manual (optional — used for state reconciliation) |
+
+### libvirt backend
+
+| Tool | Verify | Notes |
+|------|--------|-------|
+| virsh | `virsh --version` | `dnf install libvirt-client` |
+| qemu-img | `qemu-img --version` | `dnf install qemu-img` |
+| SSH key pair | `ls ~/.ssh/id_*.pub` | set `TF_VAR_ssh_private_key_path` in env profile |
+
+### Cilium addon
+
+| Tool | Verify | Installed by |
+|------|--------|--------------|
+| helm | `helm version` | `./scripts/k8s-tool.sh host-setup` |
+
+### ilab CLI build
+
+| Tool | Min version | Verify |
+|------|-------------|--------|
+| go | 1.22 | `go version` |
+
+> **host-setup shortcut (Rocky/RHEL):** `HOST_PROFILE=envs/<name>.env ./scripts/k8s-tool.sh host-setup`
+> installs tofu, multipass, kubectl, helm, and python3 via dnf/snap.
+> Manual install is needed for libvirt tools and Go.
+
 ## Quick start
 
 ### 1. Pick an environment profile

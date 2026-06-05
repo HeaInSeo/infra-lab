@@ -1,4 +1,0 @@
-NAME           STATUS   ROLES           AGE   VERSION    INTERNAL-IP     EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION      CONTAINER-RUNTIME
-lab-master-0   Ready    control-plane   28d   v1.32.13   10.113.24.254   <none>        Ubuntu 24.04.4 LTS   6.8.0-107-generic   containerd://2.2.1
-lab-worker-0   Ready    <none>          28d   v1.32.13   10.113.24.35    <none>        Ubuntu 24.04.4 LTS   6.8.0-110-generic   containerd://2.2.1
-lab-worker-1   Ready    <none>          28d   v1.32.13   10.113.24.216   <none>        Ubuntu 24.04.4 LTS   6.8.0-110-generic   containerd://2.2.1
