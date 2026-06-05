@@ -2,6 +2,21 @@ SHELL       := /usr/bin/env bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := check
 
+ILAB_BIN := bin/ilab
+
+.PHONY: build
+build:
+	@echo "==> build ilab CLI"
+	@mkdir -p bin
+	@cd ilab && go build -o ../$(ILAB_BIN) .
+	@echo "[OK] $(ILAB_BIN)"
+
+.PHONY: install
+install:
+	@echo "==> install ilab to GOPATH/bin"
+	@cd ilab && go install .
+	@echo "[OK] ilab installed"
+
 TF_DIRS := . backends/libvirt
 
 # SC2191: false positive in shellcheck <0.7 for ssh -o Key=Value arrays
@@ -80,3 +95,7 @@ help:
 	@echo "  env-down    Destroy cluster   (ENV_PROFILE=envs/<name>.env)"
 	@echo "  env-status  Show cluster/VM status"
 	@echo "  env-clean   Remove local state files (irreversible)"
+	@echo ""
+	@echo "CLI targets:"
+	@echo "  build       Build ilab CLI binary to bin/ilab"
+	@echo "  install     Install ilab CLI to GOPATH/bin"
