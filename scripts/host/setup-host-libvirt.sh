@@ -12,15 +12,24 @@ require_linux() {
   ok "Detected OS: ${PRETTY_NAME:-unknown}"
 }
 
+require_opentofu() {
+  if need_cmd tofu; then
+    ok "OpenTofu: $(tofu --version | head -n 1)"
+    return
+  fi
+  die "tofu not found. Install OpenTofu first: https://opentofu.org/docs/intro/install/"
+}
+
 require_libvirt() {
-  need_cmd virsh || die "virsh not found"
-  need_cmd qemu-img || die "qemu-img not found"
+  need_cmd virsh   || die "virsh not found; install libvirt-client"
+  need_cmd qemu-img || die "qemu-img not found; install qemu-img"
   sudo virsh -c "${LIBVIRT_URI:-qemu:///system}" uri >/dev/null
   ok "libvirt reachable: ${LIBVIRT_URI:-qemu:///system}"
 }
 
 main() {
   require_linux
+  require_opentofu
   require_libvirt
 }
 

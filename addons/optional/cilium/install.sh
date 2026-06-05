@@ -17,6 +17,12 @@ CILIUM_NS="${CILIUM_NS:-kube-system}"
 
 echo "[INFO] install optional addon: cilium ${CILIUM_VERSION}"
 
+if kubectl -n kube-flannel get ds kube-flannel-ds >/dev/null 2>&1; then
+  echo "[ERROR] Flannel is still installed." >&2
+  echo "        Run scripts/cluster/flannel-to-cilium.sh instead of installing Cilium directly." >&2
+  exit 1
+fi
+
 # ── 1. Gateway API CRD 설치 ────────────────────────────────────────────────
 echo "[INFO] installing Gateway API CRDs ${GATEWAY_API_VERSION}"
 kubectl apply -f \

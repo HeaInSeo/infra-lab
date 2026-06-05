@@ -1,12 +1,14 @@
 .terraform/
-.terraform.lock.hcl
 terraform.tfstate
 terraform.tfstate.*
 tofu.tfstate
 tofu.tfstate.*
 tofu.tfstate.d/
 kubeconfig
+kubeconfig.libvirt
 hosts.generated
+hosts/*.env
+envs/*.env
 *.bak
 __pycache__/
 *.pyc

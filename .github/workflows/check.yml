@@ -1,0 +1,47 @@
+name: check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shell:
+    name: Shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+
+      - name: Run shell checks
+        run: make lint-shell
+
+  hcl:
+    name: OpenTofu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Run HCL checks
+        run: make lint-hcl
+
+  yaml:
+    name: YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install python3-yaml
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-yaml
+
+      - name: Run YAML checks
+        run: make lint-yaml

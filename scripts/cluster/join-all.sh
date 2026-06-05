@@ -12,7 +12,7 @@ MASTER0_ENDPOINT="${MASTER0_ENDPOINT:-}"
 MASTER_ENDPOINTS="${MASTER_ENDPOINTS:-}"
 WORKER_ENDPOINTS="${WORKER_ENDPOINTS:-}"
 
-# shellcheck disable=SC1091
+# shellcheck disable=SC1090,SC1091
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/runtime/lib.sh"
 require_runtime
 

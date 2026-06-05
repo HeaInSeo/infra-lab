@@ -41,8 +41,8 @@ runcmd:
   - chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
   - sh -c 'echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /" > /etc/apt/sources.list.d/kubernetes.list'
   - apt-get update
-  - apt-get install -y containerd kubelet kubeadm kubectl
-  - apt-mark hold kubelet kubeadm kubectl
+  - sh -c 'KUBE_VERSION=1.32.5; apt-get install -y containerd "kubelet=${KUBE_VERSION}-*" "kubeadm=${KUBE_VERSION}-*" "kubectl=${KUBE_VERSION}-*"'
+  - apt-mark hold kubelet kubeadm kubectl containerd
   - mkdir -p /etc/containerd
   - containerd config default > /etc/containerd/config.toml
   - sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml

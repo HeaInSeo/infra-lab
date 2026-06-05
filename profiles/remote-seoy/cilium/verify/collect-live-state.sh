@@ -17,7 +17,8 @@ helm -n "${CILIUM_NS}" get values cilium -o yaml \
 
 if cilium status --wait=false > "${SNAPSHOT_DIR}/cilium-status.txt" 2>/dev/null; then
   :
-elif sudo cilium status --wait=false > "${SNAPSHOT_DIR}/cilium-status.txt" 2>/dev/null; then
+elif { sudo cilium status --wait=false 2>/dev/null; } \
+  > "${SNAPSHOT_DIR}/cilium-status.txt"; then
   :
 else
   kubectl -n "${CILIUM_NS}" exec ds/cilium -- cilium-dbg status \
@@ -34,8 +35,8 @@ kubectl get ciliumloadbalancerippools.cilium.io -A -o yaml \
   > "${SNAPSHOT_DIR}/lb-pool.yaml"
 kubectl get ciliuml2announcementpolicies.cilium.io -A -o yaml \
   > "${SNAPSHOT_DIR}/l2-announcement-policy.yaml"
-kubectl get cnp,ccnp -A 2>&1 \
-  > "${SNAPSHOT_DIR}/network-policies.txt"
+kubectl get cnp,ccnp -A \
+  > "${SNAPSHOT_DIR}/network-policies.txt" 2>&1
 kubectl get ciliumenvoyconfig -A \
   > "${SNAPSHOT_DIR}/ciliumenvoyconfigs.txt"
 

@@ -2,15 +2,20 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TOOL="${TOOL:-tofu}"
-KUBECONFIG_PATH="${KUBECONFIG_PATH:-${ROOT_DIR}/kubeconfig}"
-BLOCKED_LOCAL_TS_IP="${BLOCKED_LOCAL_TS_IP:-100.92.45.46}"
-BACKEND="${BACKEND:-multipass}"
-AUTO_INSTALL_BASE_ADDONS="${AUTO_INSTALL_BASE_ADDONS:-1}"
-LAB_HOST_MODE="${LAB_HOST_MODE:-local}"
-LAB_REMOTE_SSH_TARGET="${LAB_REMOTE_SSH_TARGET:-}"
-LAB_REMOTE_REPO_PATH="${LAB_REMOTE_REPO_PATH:-}"
-LAB_REMOTE_SSH_CONFIG="${LAB_REMOTE_SSH_CONFIG:-/dev/null}"
+
+# Capture user-passed env values before sourcing the profile so they take precedence.
+_env_BACKEND="${BACKEND:-}"
+_env_TOOL="${TOOL:-}"
+_env_KUBECONFIG_PATH="${KUBECONFIG_PATH:-}"
+_env_BLOCKED_LOCAL_TS_IP="${BLOCKED_LOCAL_TS_IP:-}"
+_env_AUTO_INSTALL_BASE_ADDONS="${AUTO_INSTALL_BASE_ADDONS:-}"
+_env_LAB_HOST_MODE="${LAB_HOST_MODE:-}"
+_env_LAB_REMOTE_SSH_TARGET="${LAB_REMOTE_SSH_TARGET:-}"
+_env_LAB_REMOTE_REPO_PATH="${LAB_REMOTE_REPO_PATH:-}"
+_env_LAB_REMOTE_SSH_CONFIG="${LAB_REMOTE_SSH_CONFIG:-}"
+_env_CNI="${CNI:-}"
+_env_ADDONS="${ADDONS:-}"
+_env_NAME_PREFIX="${NAME_PREFIX:-}"
 HOST_PROFILE="${HOST_PROFILE:-}"
 
 if [[ -n "$HOST_PROFILE" ]]; then
@@ -25,6 +30,27 @@ if [[ -n "$HOST_PROFILE" ]]; then
     echo "host profile not found: $profile_path" >&2
     exit 1
   fi
+fi
+
+# Command-line env > profile values > built-in defaults
+TOOL="${_env_TOOL:-${TOOL:-tofu}}"
+BACKEND="${_env_BACKEND:-${BACKEND:-multipass}}"
+BLOCKED_LOCAL_TS_IP="${_env_BLOCKED_LOCAL_TS_IP:-${BLOCKED_LOCAL_TS_IP:-100.92.45.46}}"
+AUTO_INSTALL_BASE_ADDONS="${_env_AUTO_INSTALL_BASE_ADDONS:-${AUTO_INSTALL_BASE_ADDONS:-1}}"
+LAB_HOST_MODE="${_env_LAB_HOST_MODE:-${LAB_HOST_MODE:-local}}"
+LAB_REMOTE_SSH_TARGET="${_env_LAB_REMOTE_SSH_TARGET:-${LAB_REMOTE_SSH_TARGET:-}}"
+LAB_REMOTE_REPO_PATH="${_env_LAB_REMOTE_REPO_PATH:-${LAB_REMOTE_REPO_PATH:-}}"
+LAB_REMOTE_SSH_CONFIG="${_env_LAB_REMOTE_SSH_CONFIG:-${LAB_REMOTE_SSH_CONFIG:-/dev/null}}"
+CNI="${_env_CNI:-${CNI:-flannel}}"
+ADDONS="${_env_ADDONS:-${ADDONS:-}}"
+# NAME_PREFIX mirrors TF_VAR_name_prefix so flannel-to-cilium.sh finds the right VMs
+NAME_PREFIX="${_env_NAME_PREFIX:-${NAME_PREFIX:-${TF_VAR_name_prefix:-lab}}}"
+
+# KUBECONFIG_PATH default is backend-specific; resolved after BACKEND is final
+if [[ "$BACKEND" == "libvirt" ]]; then
+  KUBECONFIG_PATH="${_env_KUBECONFIG_PATH:-${KUBECONFIG_PATH:-${ROOT_DIR}/kubeconfig.libvirt}}"
+else
+  KUBECONFIG_PATH="${_env_KUBECONFIG_PATH:-${KUBECONFIG_PATH:-${ROOT_DIR}/kubeconfig}}"
 fi
 
 if [[ -f "$KUBECONFIG_PATH" ]]; then
@@ -51,7 +77,9 @@ Commands:
 
 Env:
   BACKEND=multipass|libvirt
-  HOST_PROFILE=hosts/<profile>.env
+  CNI=flannel|cilium|none       CNI for the cluster (default: flannel)
+  ADDONS=                       Space-separated optional addons to auto-install after up
+  HOST_PROFILE=envs/<name>.env  Environment profile (sets BACKEND, CNI, ADDONS, etc.)
   LAB_HOST_MODE=local|remote
   LAB_REMOTE_SSH_TARGET=user@host
   LAB_REMOTE_REPO_PATH=/path/to/infra-lab
@@ -101,7 +129,7 @@ ensure_local_vm_allowed() {
   ts_ip="$(local_tailscale_ip)"
   if [[ -n "$ts_ip" && "$ts_ip" == "$BLOCKED_LOCAL_TS_IP" ]]; then
     echo "local VM operations are blocked on ${ts_ip}; use the remote lab host instead" >&2
-    echo "remote lab host: seoy@100.123.80.48" >&2
+    [[ -n "$LAB_REMOTE_SSH_TARGET" ]] && echo "remote lab host: ${LAB_REMOTE_SSH_TARGET}" >&2
     echo "set ALLOW_LOCAL_VM=1 only if you intentionally want to bypass this guard" >&2
     exit 1
   fi
@@ -145,7 +173,7 @@ reconcile_multipass_state() {
 passthrough_env() {
   while IFS='=' read -r name value; do
     case "$name" in
-      BACKEND|TOOL|KUBECONFIG_PATH|FORCE|ALLOW_LOCAL_VM|BLOCKED_LOCAL_TS_IP|VM_USER|TF_VAR_*)
+      BACKEND|CNI|ADDONS|NAME_PREFIX|TOOL|KUBECONFIG_PATH|FORCE|ALLOW_LOCAL_VM|BLOCKED_LOCAL_TS_IP|VM_USER|TF_VAR_*)
         printf '%s=%q ' "$name" "$value"
         ;;
     esac
@@ -243,6 +271,22 @@ case "$cmd" in
       echo "[INFO] verify default base add-ons"
       bash "${ROOT_DIR}/addons/manage.sh" verify base
     fi
+    if [[ "$CNI" == "cilium" ]]; then
+      if [[ "$BACKEND" == "multipass" ]]; then
+        echo "[INFO] CNI=cilium: running Flannel → Cilium migration"
+        NAME_PREFIX="$NAME_PREFIX" bash "${ROOT_DIR}/scripts/cluster/flannel-to-cilium.sh"
+      else
+        echo "[WARN] CNI=cilium with BACKEND=${BACKEND}: auto-migration is not supported for this backend." >&2
+        echo "[WARN] Run scripts/cluster/flannel-to-cilium.sh manually after setting the VM endpoints." >&2
+      fi
+    fi
+    if [[ -n "$ADDONS" ]]; then
+      for addon in $ADDONS; do
+        echo "[INFO] install optional addon: ${addon}"
+        bash "${ROOT_DIR}/addons/manage.sh" install optional "${addon}"
+        bash "${ROOT_DIR}/addons/manage.sh" verify optional "${addon}"
+      done
+    fi
     ;;
   down)
     ensure_local_vm_allowed
@@ -277,10 +321,8 @@ case "$cmd" in
     fi
     (
       cd "$(backend_dir)"
-      rm -rf .terraform .terraform.lock.hcl terraform.tfstate* tofu.tfstate* tofu.tfstate.d
-      if [[ "$BACKEND" == "multipass" ]]; then
-        rm -f "$KUBECONFIG_PATH"
-      fi
+      rm -rf .terraform terraform.tfstate* tofu.tfstate* tofu.tfstate.d
+      rm -f "$KUBECONFIG_PATH"
     )
     ;;
   addons-install)
