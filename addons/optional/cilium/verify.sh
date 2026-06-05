@@ -8,6 +8,7 @@ FAIL=0
 
 check() {
   local label="$1"; shift
+  # shellcheck disable=SC2294
   if eval "$@" >/dev/null 2>&1; then
     echo "  [OK]  ${label}"
     PASS=$((PASS + 1))
