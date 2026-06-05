@@ -178,7 +178,7 @@ func (e *Env) SSH(vmName string) error {
 	case "libvirt":
 		ip := libvirtVMIP(vmName)
 		if ip == "" {
-			return fmt.Errorf("VM %q: not found or no IP address", vmName)
+			return fmt.Errorf("VM %q: not found in libvirt or no IP address — is it running?", vmName)
 		}
 		cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no",
 			"-o", "UserKnownHostsFile=/dev/null", "ubuntu@"+ip)
@@ -376,9 +376,11 @@ func runKubectl(kubeconfig string, args ...string) error {
 	return cmd.Run()
 }
 
+const libvirtURI = "qemu:///system"
+
 // listLibvirtVMs uses virsh to enumerate VMs, optionally filtered by name prefix.
 func listLibvirtVMs(prefix string) ([]VMInfo, error) {
-	out, err := exec.Command("virsh", "list", "--all", "--name").Output()
+	out, err := exec.Command("virsh", "-c", libvirtURI, "list", "--all", "--name").Output()
 	if err != nil {
 		return nil, fmt.Errorf("virsh list: %w", err)
 	}
@@ -390,7 +392,7 @@ func listLibvirtVMs(prefix string) ([]VMInfo, error) {
 		if prefix != "" && !strings.HasPrefix(name, prefix+"-") {
 			continue
 		}
-		stOut, _ := exec.Command("virsh", "domstate", name).Output()
+		stOut, _ := exec.Command("virsh", "-c", libvirtURI, "domstate", name).Output()
 		state := strings.TrimSpace(string(stOut))
 		if state == "" {
 			state = "unknown"
@@ -403,7 +405,7 @@ func listLibvirtVMs(prefix string) ([]VMInfo, error) {
 
 // libvirtVMIP returns the first IPv4 address of a libvirt VM via DHCP lease lookup.
 func libvirtVMIP(vmName string) string {
-	out, err := exec.Command("virsh", "domifaddr", vmName).Output()
+	out, err := exec.Command("virsh", "-c", libvirtURI, "domifaddr", vmName).Output()
 	if err != nil {
 		return ""
 	}
