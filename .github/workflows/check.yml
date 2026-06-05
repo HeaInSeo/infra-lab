@@ -10,7 +10,7 @@ jobs:
     name: Shell
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install shellcheck
         run: |
@@ -24,7 +24,7 @@ jobs:
     name: OpenTofu
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
@@ -36,7 +36,7 @@ jobs:
     name: YAML
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install python3-yaml
         run: |
