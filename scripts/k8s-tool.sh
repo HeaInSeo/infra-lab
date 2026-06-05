@@ -250,6 +250,10 @@ _write_vm_build_json() {
 
   echo "[INFO] writing /etc/infra-lab/build.json to all VMs"
   VM_RUNTIME="$_runtime" \
+  BACKEND="$BACKEND" \
+  ENV_NAME="$ENV_NAME" \
+  CNI="$CNI" \
+  NAME_PREFIX="$NAME_PREFIX" \
   INFRA_LAB_GIT_COMMIT="$_commit" \
   INFRA_LAB_GIT_BRANCH="$_branch" \
   MASTER_ENDPOINTS="${MASTER_ENDPOINTS:-${_master_endpoints}}" \
