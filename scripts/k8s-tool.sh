@@ -180,6 +180,27 @@ passthrough_env() {
   done < <(env)
 }
 
+write_env_meta() {
+  local meta_file git_commit git_branch
+  meta_file="${KUBECONFIG_PATH}.meta"
+
+  git_commit="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+  git_branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+
+  cat > "$meta_file" <<EOF
+infra_lab_git_commit=${git_commit}
+infra_lab_git_branch=${git_branch}
+backend=${BACKEND}
+cni=${CNI}
+name_prefix=${NAME_PREFIX}
+addons=${ADDONS}
+kubeconfig=${KUBECONFIG_PATH}
+created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+
+  echo "[INFO] environment metadata written: ${meta_file}"
+}
+
 run_profile_script() {
   local script_path="$1"
 
@@ -288,6 +309,7 @@ case "$cmd" in
         bash "${ROOT_DIR}/addons/manage.sh" verify optional "${addon}"
       done
     fi
+    write_env_meta
     ;;
   down)
     ensure_local_vm_allowed
@@ -323,7 +345,7 @@ case "$cmd" in
     (
       cd "$(backend_dir)"
       rm -rf .terraform terraform.tfstate* tofu.tfstate* tofu.tfstate.d
-      rm -f "$KUBECONFIG_PATH"
+      rm -f "$KUBECONFIG_PATH" "${KUBECONFIG_PATH}.meta"
     )
     ;;
   addons-install)
