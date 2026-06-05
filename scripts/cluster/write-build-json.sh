@@ -92,13 +92,15 @@ elif [[ "$VM_RUNTIME" == "ssh" ]]; then
   IFS=',' read -ra _masters <<< "$MASTER_ENDPOINTS"
   for ip in "${_masters[@]}"; do
     [[ -n "$ip" ]] || continue
-    _write_build_json "$ip" "control-plane" "$ip"
+    _name="$(vm_exec "$ip" "hostname 2>/dev/null" || echo "$ip")"
+    _write_build_json "$ip" "control-plane" "$_name"
   done
 
   IFS=',' read -ra _workers <<< "$WORKER_ENDPOINTS"
   for ip in "${_workers[@]}"; do
     [[ -n "$ip" ]] || continue
-    _write_build_json "$ip" "worker" "$ip"
+    _name="$(vm_exec "$ip" "hostname 2>/dev/null" || echo "$ip")"
+    _write_build_json "$ip" "worker" "$_name"
   done
 
 else
