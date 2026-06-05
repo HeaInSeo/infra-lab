@@ -377,6 +377,10 @@ case "$cmd" in
       "$TOOL" plan "${_state_args[@]}"
       "$TOOL" apply -auto-approve "${_state_args[@]}"
     )
+    # Kubeconfig is written by tofu apply; export it now so addon installers can use kubectl.
+    if [[ -f "$KUBECONFIG_PATH" ]]; then
+      export KUBECONFIG="$KUBECONFIG_PATH"
+    fi
     _write_vm_build_json
     if [[ "$AUTO_INSTALL_BASE_ADDONS" == "1" ]]; then
       echo "[INFO] install default base add-ons"
