@@ -197,6 +197,7 @@ for NODE_IP in ${NODE_IPS}; do
     sudo cp /tmp/harbor-ca.crt /usr/local/share/ca-certificates/harbor-ca.crt
     sudo update-ca-certificates
     rm -f /tmp/harbor-ca.crt
+    grep -q '${HARBOR_HOSTNAME}' /etc/hosts || sudo sh -c 'echo \"${GATEWAY_IP} ${HARBOR_HOSTNAME}\" >> /etc/hosts'
     sudo systemctl restart containerd
     sleep 3
     sudo systemctl restart kubelet
