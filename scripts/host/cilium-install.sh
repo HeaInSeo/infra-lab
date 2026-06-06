@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
-# cilium-install.sh — kubeadm 클러스터에 Cilium을 설치하거나 flannel에서 마이그레이션한다.
+# cilium-install.sh — Cilium 설치 (순수 설치만 담당).
 #
-# 포함 기능:
-#   - flannel 제거 (설치된 경우)
-#   - kube-proxy 제거 (kubeProxyReplacement 모드)
-#   - Cilium 1.19.x with Gateway API + L2 Announcements + LB IPAM
-#   - Gateway API CRDs (standard channel)
-#   - Cilium LB IPAM pool (HARBOR_LB_CIDR 기반)
+# 이 스크립트의 역할:
+#   - Cilium helm install (Gateway API + L2 Announcements + LB IPAM)
+#   - Gateway API CRDs 설치
+#   - Cilium LB IPAM pool + L2 Announcement Policy 생성
+#
+# 이 스크립트가 하지 않는 것:
+#   - Flannel 제거 — flannel-to-cilium.sh 에서 수행
+#   - CNI 잔여 네트워크 디바이스 삭제 — 노드 직접 접근이 필요한 작업은
+#     이 스크립트의 역할이 아님
+#   - 노드 SSH 접속
 #
 # 사전 조건:
 #   - kubectl, helm이 PATH에 있어야 한다.
 #   - KUBECONFIG가 대상 클러스터를 가리켜야 한다.
+#   - 클러스터에 다른 CNI(Flannel 등)가 설치되어 있으면 안 된다.
+#     (Flannel에서 전환하려면 scripts/host/flannel-to-cilium.sh 를 사용할 것)
 #
 # 환경변수:
 #   KUBECONFIG         — 대상 클러스터 kubeconfig (필수)
-#   HARBOR_LB_CIDR     — Harbor Gateway에 할당할 IP 대역 (기본: 192.168.122.200/32)
+#   LB_IPAM_CIDR       — LB IPAM에 할당할 IP 대역 (기본: 192.168.122.200/32)
 #   CILIUM_VERSION     — Cilium helm chart 버전 (기본: 1.19.4)
 #
 # 사용법:
@@ -22,14 +28,21 @@
 set -euo pipefail
 
 CILIUM_VERSION="${CILIUM_VERSION:-1.19.4}"
-HARBOR_LB_CIDR="${HARBOR_LB_CIDR:-192.168.122.200/32}"
-
-# Gateway API CRDs (standard channel)
+LB_IPAM_CIDR="${LB_IPAM_CIDR:-192.168.122.200/32}"
 GATEWAY_API_CRD_URL="https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml"
 
 echo "[cilium-install] KUBECONFIG=${KUBECONFIG:-<default>}"
 echo "[cilium-install] Cilium version: ${CILIUM_VERSION}"
-echo "[cilium-install] LB IPAM CIDR: ${HARBOR_LB_CIDR}"
+echo "[cilium-install] LB IPAM CIDR: ${LB_IPAM_CIDR}"
+
+# ── guard: Flannel이 설치되어 있으면 중단 ─────────────────────────────────────
+
+if kubectl get daemonset kube-flannel-ds -n kube-flannel >/dev/null 2>&1; then
+  echo "[cilium-install] ERROR: Flannel daemonset detected."
+  echo "[cilium-install] Direct Cilium install on a Flannel cluster will cause CNI conflicts."
+  echo "[cilium-install] Use scripts/host/flannel-to-cilium.sh for migration."
+  exit 1
+fi
 
 # ── 0. API server 주소 자동 감지 ──────────────────────────────────────────────
 
@@ -37,36 +50,17 @@ K8S_API_HOST=$(kubectl get endpoints kubernetes -o jsonpath='{.subsets[0].addres
 K8S_API_PORT=$(kubectl get endpoints kubernetes -o jsonpath='{.subsets[0].ports[0].port}')
 echo "[cilium-install] API server: ${K8S_API_HOST}:${K8S_API_PORT}"
 
-# ── 1. flannel 제거 (있으면) ─────────────────────────────────────────────────
-
-if kubectl get daemonset kube-flannel-ds -n kube-flannel >/dev/null 2>&1; then
-  echo "[cilium-install] removing flannel..."
-  kubectl delete -n kube-flannel daemonset kube-flannel-ds --ignore-not-found
-  kubectl delete namespace kube-flannel --ignore-not-found
-  # CNI 설정 파일 노드에서 정리 (flannel이 남긴 cni config가 Cilium 초기화를 방해할 수 있음)
-  for NODE_IP in $(kubectl get nodes \
-    -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}'); do
-    ssh -i "${SSH_KEY_PATH:-${HOME}/.ssh/id_ed25519}" \
-      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -o LogLevel=ERROR -o BatchMode=yes \
-      "${VM_USER:-ubuntu}@${NODE_IP}" \
-      "sudo rm -f /etc/cni/net.d/10-flannel.conflist && echo 'cni cleaned on ${NODE_IP}'" || true
-  done
-  echo "[cilium-install] flannel removed."
-else
-  echo "[cilium-install] flannel not found, skipping removal."
-fi
-
-# ── 2. kube-proxy 제거 (kubeProxyReplacement 모드) ───────────────────────────
+# ── 1. kube-proxy 제거 (kubeProxyReplacement 모드) ───────────────────────────
+# kube-proxy 제거는 Cilium kubeProxyReplacement 설정의 일부로 여기서 수행한다.
+# Flannel cleanup이 아닌 Cilium 설치 요건이기 때문에 이 스크립트에 속한다.
 
 if kubectl get daemonset kube-proxy -n kube-system >/dev/null 2>&1; then
-  echo "[cilium-install] removing kube-proxy..."
+  echo "[cilium-install] removing kube-proxy (kubeProxyReplacement mode)..."
   kubectl -n kube-system delete daemonset kube-proxy --ignore-not-found
   kubectl -n kube-system delete configmap kube-proxy --ignore-not-found
-  echo "[cilium-install] kube-proxy removed."
 fi
 
-# ── 3. Cilium helm install ───────────────────────────────────────────────────
+# ── 2. Cilium helm install ───────────────────────────────────────────────────
 
 echo "[cilium-install] installing Cilium ${CILIUM_VERSION}..."
 helm upgrade --install cilium cilium/cilium \
@@ -85,37 +79,36 @@ helm upgrade --install cilium cilium/cilium \
 
 echo "[cilium-install] Cilium installed."
 
-# ── 4. 모든 노드 Ready 대기 ──────────────────────────────────────────────────
+# ── 3. 모든 노드 Ready 대기 ───────────────────────────────────────────────────
 
 echo "[cilium-install] waiting for nodes to become Ready..."
 sleep 10
 kubectl wait nodes --all --for=condition=Ready --timeout=180s
 
-# ── 5. Gateway API CRDs 설치 ─────────────────────────────────────────────────
+# ── 4. Gateway API CRDs ──────────────────────────────────────────────────────
 
-echo "[cilium-install] installing Gateway API CRDs..."
 if ! kubectl get crd gateways.gateway.networking.k8s.io >/dev/null 2>&1; then
+  echo "[cilium-install] installing Gateway API CRDs..."
   kubectl apply -f "${GATEWAY_API_CRD_URL}"
-  echo "[cilium-install] Gateway API CRDs installed."
 else
   echo "[cilium-install] Gateway API CRDs already present."
 fi
 
-# ── 6. Cilium LB IPAM pool ───────────────────────────────────────────────────
+# ── 5. Cilium LB IPAM pool + L2 Announcement Policy ─────────────────────────
 
-echo "[cilium-install] applying LB IPAM pool (${HARBOR_LB_CIDR})..."
+echo "[cilium-install] applying LB IPAM pool (${LB_IPAM_CIDR})..."
 kubectl apply -f - <<EOF
-apiVersion: "cilium.io/v2alpha1"
+apiVersion: "cilium.io/v2"
 kind: CiliumLoadBalancerIPPool
 metadata:
   name: lab-pool
 spec:
   blocks:
-    - cidr: "${HARBOR_LB_CIDR}"
+    - cidr: "${LB_IPAM_CIDR}"
 EOF
 
 kubectl apply -f - <<EOF
-apiVersion: "cilium.io/v2alpha1"
+apiVersion: "cilium.io/v2"
 kind: CiliumL2AnnouncementPolicy
 metadata:
   name: lab-l2-policy
@@ -128,12 +121,10 @@ spec:
       kubernetes.io/os: linux
 EOF
 
-echo "[cilium-install] LB IPAM pool and L2 announcement policy applied."
-
 # ── 완료 ──────────────────────────────────────────────────────────────────────
 
 echo ""
 echo "[cilium-install] ✓ Done."
-echo "[cilium-install]   Cilium:       ${CILIUM_VERSION}"
-echo "[cilium-install]   LB IPAM:      ${HARBOR_LB_CIDR}"
-echo "[cilium-install]   Gateway API:  ready"
+echo "[cilium-install]   Cilium:      ${CILIUM_VERSION}"
+echo "[cilium-install]   LB IPAM:     ${LB_IPAM_CIDR}"
+echo "[cilium-install]   Gateway API: ready"
