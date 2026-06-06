@@ -78,6 +78,7 @@ helm upgrade --install harbor harbor/harbor \
   --namespace "${HARBOR_NAMESPACE}" \
   --values "${HARBOR_VALUES}" \
   --set externalURL="${HARBOR_EXTERNAL_URL}" \
+  --set expose.tls.auto.commonName="${HARBOR_NODE_IP}" \
   --set harborAdminPassword="${HARBOR_ADMIN_PASSWORD}" \
   --timeout 10m \
   --wait
