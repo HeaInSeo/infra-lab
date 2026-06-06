@@ -18,3 +18,4 @@ ilab/ilab
 *.bak
 __pycache__/
 *.pyc
+profiles/
