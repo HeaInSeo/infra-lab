@@ -69,12 +69,26 @@ var envRebuildCmd = &cobra.Command{
 	RunE:  runEnvRebuild,
 }
 
+// env up override flags
+var (
+	envUpCNI     string
+	envUpWorkers int
+	envUpSaveAs  string
+	envUpApprove bool
+)
+
 func init() {
 	envCmd.AddCommand(envListCmd)
 	envCmd.AddCommand(envStatusCmd)
 	envCmd.AddCommand(envUseCmd)
 	envCmd.AddCommand(envPlanCmd)
+
+	envUpCmd.Flags().StringVar(&envUpCNI, "cni", "", "override CNI (immutable — requires --save-as)")
+	envUpCmd.Flags().IntVar(&envUpWorkers, "workers", 0, "override worker count (scale-in requires --approve)")
+	envUpCmd.Flags().StringVar(&envUpSaveAs, "save-as", "", "save overrides as a new profile before running up")
+	envUpCmd.Flags().BoolVar(&envUpApprove, "approve", false, "approve scale-in (worker decrease)")
 	envCmd.AddCommand(envUpCmd)
+
 	envCmd.AddCommand(envDownCmd)
 	envRebuildCmd.Flags().BoolVar(&envRebuildApprove, "approve", false, "actually execute down + up (required)")
 	envCmd.AddCommand(envRebuildCmd)
@@ -182,6 +196,10 @@ func runEnvPlan(_ *cobra.Command, args []string) error {
 
 // runEnvUp brings up an environment by delegating to k8s-tool.sh up,
 // then writes a resolved-profile.yaml on success.
+//
+// Flag overrides are validated before execution:
+//   - Immutable fields (cni, backend, osImage, masters) require --save-as.
+//   - Worker scale-in requires --approve.
 func runEnvUp(_ *cobra.Command, args []string) error {
 	root, err := lab.FindRoot()
 	if err != nil {
@@ -192,12 +210,85 @@ func runEnvUp(_ *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Build proposed immutable-field overrides from flags.
+	proposed := map[string]string{}
+	if envUpCNI != "" {
+		proposed["kubernetes.cni"] = envUpCNI
+	}
+
+	// Guard: immutable field changes require --save-as.
+	if len(proposed) > 0 {
+		if conflicts := p.CheckImmutableConflicts(proposed); len(conflicts) > 0 && envUpSaveAs == "" {
+			fmt.Fprintln(os.Stderr, "error: this command would change immutable profile fields:")
+			for _, c := range conflicts {
+				fmt.Fprintf(os.Stderr, "  - %s: %s -> %s\n", c.Field, c.OldValue, c.NewValue)
+			}
+			fmt.Fprintln(os.Stderr, "\nUse one of:")
+			fmt.Fprintf(os.Stderr, "  ilab profile clone %s <new-name>\n", p.Name)
+			fmt.Fprintf(os.Stderr, "  ilab env up %s --cni %s --save-as <new-name>\n", p.Name, envUpCNI)
+			return fmt.Errorf("immutable field change blocked — add --save-as <new-profile> to create a new profile")
+		}
+	}
+
+	// Guard: scale-in requires --approve.
+	if envUpWorkers > 0 && envUpWorkers < p.VM.Workers && !envUpApprove {
+		return fmt.Errorf("scale-in (%d → %d workers) is destructive — re-run with --approve", p.VM.Workers, envUpWorkers)
+	}
+
+	// --save-as: apply all overrides to a new profile, then run up with it.
+	if envUpSaveAs != "" {
+		p, err = saveProfileWithOverrides(p, proposed, envUpWorkers, envUpSaveAs)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Ephemeral overrides (mutable fields only at this point).
+		if envUpWorkers > 0 {
+			cp := *p
+			cp.VM.Workers = envUpWorkers
+			p = &cp
+		}
+	}
+
 	if err := runKToolWithProfile(root, p, "up"); err != nil {
 		return err
 	}
-
-	// Write resolved-profile.yaml on success.
 	return writeResolvedProfile(root, p)
+}
+
+// saveProfileWithOverrides copies base with proposed+worker overrides, saves to
+// ~/.config/infra-lab/profiles/<newName>.yaml, and returns the new profile.
+func saveProfileWithOverrides(base *lab.Profile, proposed map[string]string, workers int, newName string) (*lab.Profile, error) {
+	cp := *base
+	cp.Name = newName
+	cp.State.Dir = "state/" + newName
+
+	if cni, ok := proposed["kubernetes.cni"]; ok {
+		cp.Kubernetes.CNI = cni
+	}
+	if workers > 0 {
+		cp.VM.Workers = workers
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	dir := filepath.Join(home, ".config", "infra-lab", "profiles")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("create profiles dir: %w", err)
+	}
+
+	data, err := yaml.Marshal(&cp)
+	if err != nil {
+		return nil, fmt.Errorf("marshal profile: %w", err)
+	}
+	outPath := filepath.Join(dir, newName+".yaml")
+	if err := os.WriteFile(outPath, data, 0600); err != nil {
+		return nil, fmt.Errorf("write profile: %w", err)
+	}
+	fmt.Printf("Profile saved: %s\n", outPath)
+	return &cp, nil
 }
 
 // runEnvDown tears down an environment by delegating to k8s-tool.sh down.

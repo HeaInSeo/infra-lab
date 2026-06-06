@@ -4,10 +4,120 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// osImageURLs maps canonical OS image names to cloud image download URLs.
+var osImageURLs = map[string]string{
+	"ubuntu-24.04": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+	"ubuntu-22.04": "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img",
+	"ubuntu-20.04": "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img",
+}
+
+// OSImageURL returns the cloud image URL for the given OS image name,
+// or an empty string if it is not in the built-in lookup table.
+func OSImageURL(osImage string) string {
+	return osImageURLs[osImage]
+}
+
+// SupportedOSImages returns the sorted list of known OS image names.
+func SupportedOSImages() []string {
+	out := make([]string, 0, len(osImageURLs))
+	for k := range osImageURLs {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ImmutableConflict describes a proposed change to a field that must not change in-place.
+type ImmutableConflict struct {
+	Field    string // YAML path, e.g. "kubernetes.cni"
+	OldValue string
+	NewValue string
+}
+
+// immutableGetters maps YAML field paths to their current-value getters.
+var immutableGetters = map[string]func(*Profile) string{
+	"kubernetes.cni": func(p *Profile) string { return p.Kubernetes.CNI },
+	"backend":        func(p *Profile) string { return p.Backend },
+	"vm.osImage":     func(p *Profile) string { return p.VM.OSImage },
+	"vm.masters":     func(p *Profile) string { return fmt.Sprintf("%d", p.VM.Masters) },
+}
+
+// CheckImmutableConflicts returns conflicts for any proposed changes to immutable fields.
+// proposed maps field paths (e.g. "kubernetes.cni") to their desired new values.
+func (p *Profile) CheckImmutableConflicts(proposed map[string]string) []ImmutableConflict {
+	var conflicts []ImmutableConflict
+	for field, getter := range immutableGetters {
+		newVal, ok := proposed[field]
+		if !ok || newVal == "" {
+			continue
+		}
+		if oldVal := getter(p); oldVal != newVal {
+			conflicts = append(conflicts, ImmutableConflict{
+				Field:    field,
+				OldValue: oldVal,
+				NewValue: newVal,
+			})
+		}
+	}
+	return conflicts
+}
+
+// Validate checks the profile for required and consistent fields.
+// Returns a list of human-readable error strings; empty means the profile is valid.
+func (p *Profile) Validate() []string {
+	var errs []string
+
+	if p.Backend == "" {
+		errs = append(errs, "backend is required")
+	}
+	if p.Kubernetes.CNI == "" {
+		errs = append(errs, "kubernetes.cni is required")
+	}
+	if p.VM.Masters == 0 {
+		errs = append(errs, "vm.masters must be > 0")
+	}
+	if p.VM.Workers == 0 {
+		errs = append(errs, "vm.workers must be > 0")
+	}
+
+	if p.Backend == "libvirt" {
+		if p.Libvirt == nil {
+			errs = append(errs, "libvirt section is required for backend=libvirt")
+		} else {
+			if p.Libvirt.SSHPrivateKeyPath == "" {
+				errs = append(errs, "libvirt.sshPrivateKeyPath is required")
+			} else {
+				expanded := ExpandTilde(p.Libvirt.SSHPrivateKeyPath)
+				if _, err := os.Stat(expanded); err != nil {
+					errs = append(errs, fmt.Sprintf("libvirt.sshPrivateKeyPath not found: %s", expanded))
+				}
+			}
+			switch {
+			case p.Libvirt.SSHPublicKey == "":
+				errs = append(errs, "libvirt.sshPublicKey is required")
+			case strings.Contains(p.Libvirt.SSHPublicKey, "AAAA..."):
+				errs = append(errs, "libvirt.sshPublicKey contains placeholder — replace with the real public key")
+			}
+			if p.Libvirt.PoolName == "" {
+				errs = append(errs, "libvirt.poolName is required")
+			}
+			if p.Libvirt.PoolPath == "" {
+				errs = append(errs, "libvirt.poolPath is required")
+			}
+		}
+		if p.VM.ImageURL == "" {
+			errs = append(errs, "vm.imageUrl is required for backend=libvirt")
+		}
+	}
+
+	return errs
+}
 
 // Profile represents a YAML-based environment profile.
 // It is the single source of truth for an environment's desired state.
@@ -214,7 +324,7 @@ func (p *Profile) ToEnvVars() map[string]string {
 	// libvirt-specific vars.
 	if p.Backend == "libvirt" && p.Libvirt != nil {
 		if p.Libvirt.SSHPrivateKeyPath != "" {
-			vars["TF_VAR_ssh_private_key_path"] = expandTilde(p.Libvirt.SSHPrivateKeyPath)
+			vars["TF_VAR_ssh_private_key_path"] = ExpandTilde(p.Libvirt.SSHPrivateKeyPath)
 		}
 		if p.Libvirt.SSHPublicKey != "" {
 			vars["TF_VAR_ssh_public_key"] = p.Libvirt.SSHPublicKey
@@ -233,8 +343,8 @@ func (p *Profile) ToEnvVars() map[string]string {
 	return vars
 }
 
-// expandTilde replaces a leading "~" with the user's home directory.
-func expandTilde(path string) string {
+// ExpandTilde replaces a leading "~" with the user's home directory.
+func ExpandTilde(path string) string {
 	if !strings.HasPrefix(path, "~") {
 		return path
 	}

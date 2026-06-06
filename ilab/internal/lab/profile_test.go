@@ -331,7 +331,7 @@ func TestExpandTilde(t *testing.T) {
 		{"~", home},
 	}
 	for _, tc := range tests {
-		got := expandTilde(tc.in)
+		got := ExpandTilde(tc.in)
 		if got != tc.want {
 			t.Errorf("expandTilde(%q) = %q, want %q", tc.in, got, tc.want)
 		}

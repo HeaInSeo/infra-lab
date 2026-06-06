@@ -30,9 +30,171 @@ var profileCloneCmd = &cobra.Command{
 	RunE:  runProfileClone,
 }
 
+var profileShowCmd = &cobra.Command{
+	Use:   "show <name>",
+	Short: "Display profile contents",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runProfileShow,
+}
+
+var profileValidateCmd = &cobra.Command{
+	Use:   "validate <name>",
+	Short: "Validate profile fields",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runProfileValidate,
+}
+
+// profile new flags
+var (
+	profileNewBackend  string
+	profileNewCNI      string
+	profileNewWorkers  int
+	profileNewMasters  int
+	profileNewOS       string
+	profileNewSSHKey   string
+	profileNewPoolName string
+	profileNewPoolPath string
+)
+
+var profileNewCmd = &cobra.Command{
+	Use:   "new <name>",
+	Short: "Create a new profile from flags",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runProfileNew,
+}
+
 func init() {
+	profileNewCmd.Flags().StringVar(&profileNewBackend, "backend", "libvirt", "backend (libvirt|multipass)")
+	profileNewCmd.Flags().StringVar(&profileNewCNI, "cni", "flannel", "CNI plugin (flannel|cilium|calico)")
+	profileNewCmd.Flags().IntVar(&profileNewWorkers, "workers", 2, "number of worker nodes")
+	profileNewCmd.Flags().IntVar(&profileNewMasters, "masters", 1, "number of control-plane nodes")
+	profileNewCmd.Flags().StringVar(&profileNewOS, "os", "ubuntu-24.04", fmt.Sprintf("OS image name (%s)", strings.Join(lab.SupportedOSImages(), "|")))
+	profileNewCmd.Flags().StringVar(&profileNewSSHKey, "ssh-key", "~/.ssh/id_ed25519", "SSH private key path (libvirt only)")
+	profileNewCmd.Flags().StringVar(&profileNewPoolName, "pool-name", "lab-pool", "libvirt pool name")
+	profileNewCmd.Flags().StringVar(&profileNewPoolPath, "pool-path", "/var/lib/libvirt/images", "libvirt pool path")
+
 	profileCmd.AddCommand(profileListCmd)
 	profileCmd.AddCommand(profileCloneCmd)
+	profileCmd.AddCommand(profileNewCmd)
+	profileCmd.AddCommand(profileShowCmd)
+	profileCmd.AddCommand(profileValidateCmd)
+}
+
+// runProfileNew creates a new profile YAML from flags and saves it to
+// ~/.config/infra-lab/profiles/<name>.yaml.
+func runProfileNew(_ *cobra.Command, args []string) error {
+	name := args[0]
+
+	imageURL := lab.OSImageURL(profileNewOS)
+	if imageURL == "" {
+		fmt.Fprintf(os.Stderr, "warning: unknown OS image %q — vm.imageUrl will be blank; fill it in manually\n", profileNewOS)
+	}
+
+	p := &lab.Profile{
+		Name:    name,
+		Backend: profileNewBackend,
+		VM: lab.VMSpec{
+			OSImage:  profileNewOS,
+			ImageURL: imageURL,
+			Masters:  profileNewMasters,
+			Workers:  profileNewWorkers,
+			Master:   lab.NodeSpec{CPU: 2, Memory: "4G", Disk: "40G"},
+			Worker:   lab.NodeSpec{CPU: 2, Memory: "4G", Disk: "50G"},
+		},
+		Kubernetes: lab.KubernetesSpec{
+			Version: "1.32",
+			CNI:     profileNewCNI,
+		},
+		Addons: lab.AddonsSpec{
+			Base:     []string{"metrics-server"},
+			Optional: []string{},
+		},
+		State: lab.StateSpec{Dir: "state/" + name},
+	}
+
+	if profileNewBackend == "libvirt" {
+		sshPub, err := readSSHPublicKey(profileNewSSHKey)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not read public key from %s.pub: %v\n", profileNewSSHKey, err)
+			sshPub = "ssh-ed25519 AAAA... # TODO: replace with your public key"
+		}
+		p.Libvirt = &lab.LibvirtSpec{
+			SSHPrivateKeyPath: profileNewSSHKey,
+			SSHPublicKey:      sshPub,
+			PoolName:          profileNewPoolName,
+			PoolPath:          profileNewPoolPath,
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	dir := filepath.Join(home, ".config", "infra-lab", "profiles")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create profiles dir: %w", err)
+	}
+	outPath := filepath.Join(dir, name+".yaml")
+
+	if _, err := os.Stat(outPath); err == nil {
+		return fmt.Errorf("profile already exists: %s\nhint: use 'ilab profile clone %s <new-name>' to create a variant", outPath, name)
+	}
+
+	data, err := yaml.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("marshal profile: %w", err)
+	}
+	if err := os.WriteFile(outPath, data, 0600); err != nil {
+		return fmt.Errorf("write profile: %w", err)
+	}
+
+	fmt.Printf("Profile created: %s\n\n", outPath)
+	fmt.Printf("Next steps:\n")
+	fmt.Printf("  ilab profile validate %s\n", name)
+	fmt.Printf("  ilab env up %s\n", name)
+	return nil
+}
+
+// runProfileShow pretty-prints the YAML for a named profile.
+func runProfileShow(_ *cobra.Command, args []string) error {
+	p, err := lab.LoadProfile(args[0])
+	if err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("marshal profile: %w", err)
+	}
+	fmt.Print(string(data))
+	return nil
+}
+
+// runProfileValidate validates a profile's required fields and prints errors.
+func runProfileValidate(_ *cobra.Command, args []string) error {
+	p, err := lab.LoadProfile(args[0])
+	if err != nil {
+		return err
+	}
+	errs := p.Validate()
+	if len(errs) == 0 {
+		fmt.Printf("Profile %q is valid.\n", p.Name)
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "Profile %q has %d error(s):\n", p.Name, len(errs))
+	for _, e := range errs {
+		fmt.Fprintf(os.Stderr, "  - %s\n", e)
+	}
+	return fmt.Errorf("profile validation failed")
+}
+
+// readSSHPublicKey reads the public key from <privKeyPath>.pub.
+func readSSHPublicKey(privKeyPath string) (string, error) {
+	expanded := lab.ExpandTilde(privKeyPath)
+	data, err := os.ReadFile(expanded + ".pub")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 // runProfileList lists profiles from ~/.config/infra-lab/profiles/ and <repo>/envs/*.yaml.
