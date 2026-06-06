@@ -11,6 +11,7 @@ ssh_opts() {
     -F "$SSH_CONFIG_FILE"
     -o StrictHostKeyChecking=no
     -o UserKnownHostsFile=/dev/null
+    -o LogLevel=ERROR
     -o BatchMode=yes
     -o ConnectTimeout=10
   )
