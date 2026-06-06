@@ -1,0 +1,35 @@
+name: libvirt-flannel
+
+backend: libvirt
+
+vm:
+  osImage: ubuntu-24.04
+  imageUrl: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  masters: 1
+  workers: 2
+  master:
+    cpu: 2
+    memory: 4G
+    disk: 40G
+  worker:
+    cpu: 2
+    memory: 4G
+    disk: 50G
+
+kubernetes:
+  version: "1.32"   # NOTE: 현재는 cloud-init/k8s.yaml의 값이 우선됨. Phase 2에서 변수화 예정.
+  cni: flannel
+
+addons:
+  base:
+    - metrics-server
+  optional: []
+
+libvirt:
+  sshPrivateKeyPath: ~/.ssh/id_ed25519
+  sshPublicKey: "ssh-ed25519 AAAA..."   # 실제 값으로 교체
+  poolName: lab-pool
+  poolPath: /var/lib/libvirt/images
+
+state:
+  dir: state/libvirt-flannel

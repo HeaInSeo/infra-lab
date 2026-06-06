@@ -31,4 +31,5 @@ func init() {
 	rootCmd.AddCommand(vmCmd)
 	rootCmd.AddCommand(k8sCmd)
 	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(profileCmd)
 }

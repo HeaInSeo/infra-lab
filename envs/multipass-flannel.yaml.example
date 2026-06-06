@@ -1,0 +1,28 @@
+name: multipass-flannel
+
+backend: multipass
+
+vm:
+  osImage: ubuntu-24.04
+  masters: 1
+  workers: 2
+  master:
+    cpu: 2
+    memory: 4G
+    disk: 40G
+  worker:
+    cpu: 2
+    memory: 4G
+    disk: 50G
+
+kubernetes:
+  version: "1.32"
+  cni: flannel
+
+addons:
+  base:
+    - metrics-server
+  optional: []
+
+state:
+  dir: state/multipass-flannel

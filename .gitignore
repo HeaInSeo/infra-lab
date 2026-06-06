@@ -11,6 +11,7 @@ state/
 hosts.generated
 hosts/*.env
 envs/*.env
+envs/*.yaml
 *.auto.tfvars
 .codex
 bin/
