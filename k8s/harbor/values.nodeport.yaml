@@ -1,7 +1,12 @@
 expose:
   type: nodePort
   tls:
-    enabled: false
+    # TLS 활성화 필수.
+    # containerd v2.2.1 CRI 경로는 HTTP 레지스트리를 hosts.toml 설정으로
+    # 우회할 수 없다 (ctr --plain-http 는 되지만 kubelet pull 경로는 안됨).
+    # auto: Harbor가 externalURL 기반으로 self-signed cert 자동 생성.
+    enabled: true
+    certSource: auto
   nodePort:
     name: harbor
     ports:
@@ -12,10 +17,11 @@ expose:
         port: 443
         nodePort: 30003
 
-# set to the node IP that Kubernetes hosts resolve to from the host machine
-externalURL: http://192.168.122.7:30002
-
-# admin password passed via --set at install time (not stored here)
+# externalURL은 HTTPS + nodePort 30003으로 설정.
+# Harbor가 auto-cert 생성 시 이 IP/호스트를 SAN으로 포함시킨다.
+# 노드 IP는 harbor-install.sh가 HARBOR_NODE_IP 환경변수로 주입한다.
+# (기본값은 master 노드 IP 자동 감지)
+externalURL: "HARBOR_NODE_IP_PLACEHOLDER"
 
 persistence:
   enabled: true
