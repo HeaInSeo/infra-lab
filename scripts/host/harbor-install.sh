@@ -102,12 +102,14 @@ echo "[harbor-install] Harbor pods ready."
 # Gateway listener: HTTPS terminate (harbor-tls Secret)
 # Harbor backend: HTTP:80 (Gateway 뒤에서 plain HTTP)
 
-CERT_TMP_DIR=$(mktemp -d)
-CA_KEY="${CERT_TMP_DIR}/ca.key"
-CA_CRT_FILE="${CERT_TMP_DIR}/ca.crt"
-SERVER_KEY="${CERT_TMP_DIR}/server.key"
-SERVER_CSR="${CERT_TMP_DIR}/server.csr"
-SERVER_CRT="${CERT_TMP_DIR}/server.crt"
+CERT_DIR="${HOME}/.config/infra-lab/certs"
+mkdir -p "${CERT_DIR}"
+chmod 700 "${CERT_DIR}"
+CA_KEY="${CERT_DIR}/harbor-ca.key"
+CA_CRT_FILE="${CERT_DIR}/harbor-ca.crt"
+SERVER_KEY="${CERT_DIR}/harbor-server.key"
+SERVER_CSR="${CERT_DIR}/harbor-server.csr"
+SERVER_CRT="${CERT_DIR}/harbor-server.crt"
 
 echo "[harbor-install] generating self-signed TLS cert for ${HARBOR_HOSTNAME}..."
 openssl req -x509 -newkey rsa:4096 -sha256 -days 365 -nodes \
@@ -202,8 +204,8 @@ for NODE_IP in ${NODE_IPS}; do
   "
 done
 
-rm -rf "${CERT_TMP_DIR}"
 echo "[harbor-install] CA cert distributed to all nodes."
+echo "[harbor-install] Certs saved to: ${CERT_DIR}"
 
 # ── 8. 노드 안정화 대기 ───────────────────────────────────────────────────────
 
@@ -252,7 +254,8 @@ fi
 
 echo ""
 echo "[harbor-install] ✓ Done."
-echo "[harbor-install]   UI:         ${HARBOR_EXTERNAL_URL}  (admin / <HARBOR_ADMIN_PASSWORD>)"
+echo "[harbor-install]   UI:         ${HARBOR_EXTERNAL_URL}"
+echo "[harbor-install]   CA cert:    ${CERT_DIR}/harbor-ca.crt"
 if [[ -n "${GATEWAY_IP:-}" ]]; then
   echo "[harbor-install]   Gateway IP: ${GATEWAY_IP}"
   echo "[harbor-install]   DNS entry:  ${HARBOR_HOSTNAME} -> ${GATEWAY_IP}"
