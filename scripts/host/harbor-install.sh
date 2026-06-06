@@ -11,6 +11,11 @@
 #      → 이 스크립트에서는 재시작 순서를 containerd → kubelet으로 보장.
 #   3. StorageClass 없음 — 기본 kubeadm 클러스터에는 SC가 없다.
 #      → local-path-provisioner 자동 설치로 해결.
+#   4. CA cert secret 이름 — nodePort expose 타입에서는 harbor-ingress 아닌
+#      harbor-nginx secret에 ca.crt 가 저장된다.
+#   5. containerd v2 certs.d/hosts.toml 무효 — IP:port 형식의 디렉터리에서
+#      hosts.toml 이 동작하지 않았다 (containerd v2.2.1 버그 추정).
+#      → 시스템 CA store (update-ca-certificates) 에 추가하는 방식으로 해결.
 #
 # 사전 조건:
 #   - kubectl, helm이 PATH에 있어야 한다.
@@ -89,7 +94,7 @@ echo "[harbor-install] Harbor pods ready."
 
 CA_CERT_TMP=$(mktemp)
 echo "[harbor-install] extracting Harbor CA cert..."
-kubectl get secret harbor-ingress -n "${HARBOR_NAMESPACE}" \
+kubectl get secret harbor-nginx -n "${HARBOR_NAMESPACE}" \
   -o jsonpath='{.data.ca\.crt}' | base64 -d > "${CA_CERT_TMP}"
 
 if [[ ! -s "${CA_CERT_TMP}" ]]; then
@@ -114,13 +119,25 @@ for NODE_IP in ${NODE_IPS}; do
   scp ${SSH_OPTS} "${CA_CERT_TMP}" "${VM_USER}@${NODE_IP}:/tmp/harbor-ca.crt"
   # shellcheck disable=SC2029
   ssh ${SSH_OPTS} "${VM_USER}@${NODE_IP}" "
-    sudo mkdir -p '${CERTS_DIR}'
-    sudo cp /tmp/harbor-ca.crt '${CERTS_DIR}/ca.crt'
+    # System CA store: most reliable approach — works for ctr, crictl, kubelet, curl.
+    # (containerd v2 certs.d/hosts.toml approach was tried but did not take effect
+    #  even after restart, possibly a containerd v2.2.1 bug with IP:port directory names.)
+    sudo cp /tmp/harbor-ca.crt /usr/local/share/ca-certificates/harbor-ca.crt
+    sudo update-ca-certificates
     rm -f /tmp/harbor-ca.crt
+
+    # Also keep certs.d entry for compatibility with direct ctr usage.
+    sudo mkdir -p '${CERTS_DIR}'
+    sudo cp /usr/local/share/ca-certificates/harbor-ca.crt '${CERTS_DIR}/ca.crt'
+    sudo tee '${CERTS_DIR}/hosts.toml' > /dev/null <<HOSTS_EOF
+server = \"https://${HARBOR_NODE_IP}:${HARBOR_NODEPORT_HTTPS}\"
+
+[host.\"https://${HARBOR_NODE_IP}:${HARBOR_NODEPORT_HTTPS}\"]
+  ca = \"${CERTS_DIR}/ca.crt\"
+HOSTS_EOF
     # 이전 HTTP insecure 설정 정리 (v1 설치 잔재)
     sudo rm -f /etc/containerd/conf.d/registry-config.toml
-    sudo rm -rf /etc/containerd/certs.d/${HARBOR_NODE_IP}:30002
-    echo 'cert installed, restarting containerd...'
+    sudo rm -rf '/etc/containerd/certs.d/${HARBOR_NODE_IP}:30002'
     sudo systemctl restart containerd
     sleep 3
     sudo systemctl restart kubelet
