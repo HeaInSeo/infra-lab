@@ -108,17 +108,30 @@ spec:
 EOF
 
 kubectl apply -f - <<EOF
-apiVersion: "cilium.io/v2"
+apiVersion: "cilium.io/v2alpha1"
 kind: CiliumL2AnnouncementPolicy
 metadata:
   name: lab-l2-policy
 spec:
   loadBalancerIPs: true
   interfaces:
+    - "^enp.*"
     - "^eth.*"
   nodeSelector:
     matchLabels:
       kubernetes.io/os: linux
+EOF
+
+# ── 6. GatewayClass (Cilium operator가 CRD 설치 전 시작된 경우 자동 생성하지 않음) ──
+
+echo "[cilium-install] ensuring GatewayClass 'cilium' exists..."
+kubectl apply -f - <<'EOF'
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: cilium
+spec:
+  controllerName: io.cilium/gateway-controller
 EOF
 
 # ── 완료 ──────────────────────────────────────────────────────────────────────

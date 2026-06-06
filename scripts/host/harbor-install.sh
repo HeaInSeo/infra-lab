@@ -51,7 +51,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 HARBOR_NAMESPACE="${HARBOR_NAMESPACE:-harbor}"
-HARBOR_ADMIN_PASSWORD="${HARBOR_ADMIN_PASSWORD:-Harbor12345}"
+HARBOR_ADMIN_PASSWORD="${HARBOR_ADMIN_PASSWORD:?HARBOR_ADMIN_PASSWORD is required}"
 HARBOR_HOSTNAME="${HARBOR_HOSTNAME:-harbor.lab.local}"
 HARBOR_GATEWAY_PORT="${HARBOR_GATEWAY_PORT:-443}"
 HARBOR_VALUES="${REPO_ROOT}/k8s/harbor/values.gateway.yaml"
@@ -95,34 +95,46 @@ helm upgrade --install harbor harbor/harbor \
 
 echo "[harbor-install] Harbor pods ready."
 
-# ── 4. Harbor CA cert 추출 → harbor-tls Secret 생성 ─────────────────────────
+# ── 4. Self-signed TLS cert 생성 → harbor-tls Secret ────────────────────────
 #
-# Harbor가 내부적으로 생성하는 CA cert를 Gateway의 TLS termination에 재사용한다.
-# (랩 환경에서 cert-manager 없이 Harbor 자체 CA를 Gateway TLS로 사용)
+# ClusterIP expose 모드에서는 Harbor가 TLS cert를 생성하지 않는다.
+# Gateway TLS termination을 위해 openssl로 self-signed cert를 생성한다.
 # Gateway listener: HTTPS terminate (harbor-tls Secret)
-# Harbor backend: HTTP:80 (TLS 없음, Gateway 뒤에서 plain HTTP)
+# Harbor backend: HTTP:80 (Gateway 뒤에서 plain HTTP)
 
-echo "[harbor-install] extracting Harbor CA cert from harbor-nginx secret..."
-CA_CRT=$(kubectl get secret harbor-nginx -n "${HARBOR_NAMESPACE}" \
-  -o jsonpath='{.data.ca\.crt}' | base64 -d)
-TLS_CRT=$(kubectl get secret harbor-nginx -n "${HARBOR_NAMESPACE}" \
-  -o jsonpath='{.data.tls\.crt}' | base64 -d)
-TLS_KEY=$(kubectl get secret harbor-nginx -n "${HARBOR_NAMESPACE}" \
-  -o jsonpath='{.data.tls\.key}' | base64 -d)
+CERT_TMP_DIR=$(mktemp -d)
+CA_KEY="${CERT_TMP_DIR}/ca.key"
+CA_CRT_FILE="${CERT_TMP_DIR}/ca.crt"
+SERVER_KEY="${CERT_TMP_DIR}/server.key"
+SERVER_CSR="${CERT_TMP_DIR}/server.csr"
+SERVER_CRT="${CERT_TMP_DIR}/server.crt"
 
-if [[ -z "${TLS_CRT}" || -z "${TLS_KEY}" ]]; then
-  echo "[harbor-install] ERROR: could not extract TLS cert/key from harbor-nginx secret."
-  exit 1
-fi
-echo "[harbor-install] TLS cert extracted."
+echo "[harbor-install] generating self-signed TLS cert for ${HARBOR_HOSTNAME}..."
+openssl req -x509 -newkey rsa:4096 -sha256 -days 365 -nodes \
+  -keyout "${CA_KEY}" -out "${CA_CRT_FILE}" \
+  -subj "/CN=harbor-lab-ca" \
+  -extensions v3_ca 2>/dev/null
+
+openssl req -newkey rsa:4096 -nodes \
+  -keyout "${SERVER_KEY}" -out "${SERVER_CSR}" \
+  -subj "/CN=${HARBOR_HOSTNAME}" 2>/dev/null
+
+openssl x509 -req -in "${SERVER_CSR}" \
+  -CA "${CA_CRT_FILE}" -CAkey "${CA_KEY}" -CAcreateserial \
+  -out "${SERVER_CRT}" -days 365 -sha256 \
+  -extfile <(printf 'subjectAltName=DNS:%s' "${HARBOR_HOSTNAME}") 2>/dev/null
+
+echo "[harbor-install] TLS cert generated."
 
 # harbor-tls Secret (Gateway용)
 kubectl create secret tls harbor-tls \
   --namespace "${HARBOR_NAMESPACE}" \
-  --cert=<(echo "${TLS_CRT}") \
-  --key=<(echo "${TLS_KEY}") \
+  --cert="${SERVER_CRT}" \
+  --key="${SERVER_KEY}" \
   --dry-run=client -o yaml | kubectl apply -f -
 echo "[harbor-install] harbor-tls Secret applied."
+
+CA_CRT=$(cat "${CA_CRT_FILE}")
 
 # ── 5. Gateway + HTTPRoute 적용 ───────────────────────────────────────────────
 
@@ -170,9 +182,6 @@ fi
 
 # ── 7. Harbor CA를 모든 노드의 시스템 CA store에 배포 ─────────────────────────
 
-CA_CERT_TMP=$(mktemp)
-echo "${CA_CRT}" > "${CA_CERT_TMP}"
-
 SSH_OPTS="-i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10"
 NODE_IPS=$(kubectl get nodes \
   -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}')
@@ -181,7 +190,7 @@ echo "[harbor-install] distributing Harbor CA cert to nodes: ${NODE_IPS}"
 
 for NODE_IP in ${NODE_IPS}; do
   echo "[harbor-install]   -> ${NODE_IP}"
-  scp ${SSH_OPTS} "${CA_CERT_TMP}" "${VM_USER}@${NODE_IP}:/tmp/harbor-ca.crt"
+  scp ${SSH_OPTS} "${CA_CRT_FILE}" "${VM_USER}@${NODE_IP}:/tmp/harbor-ca.crt"
   ssh ${SSH_OPTS} "${VM_USER}@${NODE_IP}" "
     sudo cp /tmp/harbor-ca.crt /usr/local/share/ca-certificates/harbor-ca.crt
     sudo update-ca-certificates
@@ -193,7 +202,7 @@ for NODE_IP in ${NODE_IPS}; do
   "
 done
 
-rm -f "${CA_CERT_TMP}"
+rm -rf "${CERT_TMP_DIR}"
 echo "[harbor-install] CA cert distributed to all nodes."
 
 # ── 8. 노드 안정화 대기 ───────────────────────────────────────────────────────
@@ -243,7 +252,7 @@ fi
 
 echo ""
 echo "[harbor-install] ✓ Done."
-echo "[harbor-install]   UI:         ${HARBOR_EXTERNAL_URL}  (admin / ${HARBOR_ADMIN_PASSWORD})"
+echo "[harbor-install]   UI:         ${HARBOR_EXTERNAL_URL}  (admin / <HARBOR_ADMIN_PASSWORD>)"
 if [[ -n "${GATEWAY_IP:-}" ]]; then
   echo "[harbor-install]   Gateway IP: ${GATEWAY_IP}"
   echo "[harbor-install]   DNS entry:  ${HARBOR_HOSTNAME} -> ${GATEWAY_IP}"
