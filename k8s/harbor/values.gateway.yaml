@@ -1,0 +1,40 @@
+expose:
+  type: clusterIP
+  tls:
+    # TLS는 Gateway(Cilium)에서 termination한다.
+    # Harbor backend는 HTTP로만 노출하면 된다.
+    enabled: false
+  clusterIP:
+    name: harbor
+    ports:
+      httpPort: 80
+      httpsPort: 443
+
+# externalURL은 harbor-install.sh가 Gateway IP 확정 후 --set으로 주입한다.
+# 기본값은 자리 표시자로 둔다.
+externalURL: "HARBOR_EXTERNAL_URL_PLACEHOLDER"
+
+persistence:
+  enabled: true
+  storageClass: "local-path"
+  persistentVolumeClaim:
+    registry:
+      size: 20Gi
+    jobservice:
+      jobLog:
+        size: 1Gi
+    database:
+      size: 2Gi
+    redis:
+      size: 1Gi
+    trivy:
+      size: 5Gi
+
+chartmuseum:
+  enabled: false
+
+trivy:
+  enabled: true
+
+updateStrategy:
+  type: Recreate

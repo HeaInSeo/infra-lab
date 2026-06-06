@@ -1,0 +1,41 @@
+# Harbor Gateway — Cilium Gateway API를 통한 Harbor 외부 노출
+#
+# 구조:
+#   Client (docker/kubectl)
+#     → Cilium Gateway (harbor-gateway, LB IP: HARBOR_LB_CIDR)
+#     → HTTPRoute (harbor-route)
+#     → Harbor ClusterIP Service (harbor:80)
+#
+# 전제 조건:
+#   - Cilium with gatewayAPI.enabled=true
+#   - Gateway API CRDs (standard channel)
+#   - Cilium LB IPAM pool (scripts/host/cilium-install.sh 에서 생성)
+#   - Harbor helm install with expose.type=clusterIP
+#
+# TLS: Gateway에서 termination. Harbor backend는 HTTP(80).
+# externalURL: https://harbor.lab.local (CoreDNS로 Gateway IP 매핑)
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: harbor-gateway
+  namespace: harbor
+  annotations:
+    # harbor-install.sh가 Gateway IP를 확인하기 위해 사용하는 annotation
+    infra-lab.io/purpose: "harbor"
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "harbor.lab.local"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: harbor-tls
+            namespace: harbor
+      allowedRoutes:
+        namespaces:
+          from: Same

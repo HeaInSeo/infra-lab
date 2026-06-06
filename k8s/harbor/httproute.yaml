@@ -1,0 +1,17 @@
+# Harbor HTTPRoute — harbor-gateway에서 Harbor ClusterIP service로 라우팅
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: harbor-route
+  namespace: harbor
+spec:
+  parentRefs:
+    - name: harbor-gateway
+      namespace: harbor
+  hostnames:
+    - "harbor.lab.local"
+  rules:
+    - backendRefs:
+        - name: harbor
+          port: 80

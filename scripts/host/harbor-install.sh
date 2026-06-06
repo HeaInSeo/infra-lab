@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # harbor-install.sh — Harbor를 현재 kubeconfig 클러스터에 설치한다.
 #
-# 해결된 이슈 (v1 설치 시 발견):
+# 아키텍처:
+#   Client (docker login / kubectl run)
+#     → Cilium Gateway API (harbor-gateway, HTTPS 443)
+#     → HTTPRoute (harbor-route)
+#     → Harbor ClusterIP service (harbor:80)
+#
+# 해결된 이슈 (설치 과정에서 발견):
 #   1. HTTP 레지스트리 불가 — containerd v2.2.1 CRI path는 hosts.toml 기반
 #      HTTP 레지스트리를 지원하지 않는다 (ctr --plain-http 는 작동하지만
 #      kubelet → containerd CRI gRPC 경로는 무조건 HTTPS를 시도한다).
@@ -16,20 +22,26 @@
 #   5. containerd v2 certs.d/hosts.toml 무효 — IP:port 형식의 디렉터리에서
 #      hosts.toml 이 동작하지 않았다 (containerd v2.2.1 버그 추정).
 #      → 시스템 CA store (update-ca-certificates) 에 추가하는 방식으로 해결.
+#   6. Gateway API expose — harbor-nginx를 외부 진입점으로 쓰지 않는다.
+#      Cilium Gateway → HTTPRoute → Harbor ClusterIP 구조가 표준.
+#      externalURL은 Gateway가 발급받은 LB IP 기반 hostname을 사용.
 #
 # 사전 조건:
 #   - kubectl, helm이 PATH에 있어야 한다.
 #   - harbor helm repo: helm repo add harbor https://helm.goharbor.io && helm repo update
 #   - KUBECONFIG가 대상 클러스터를 가리켜야 한다.
 #   - SSH_KEY_PATH가 노드 SSH 접근에 사용할 키 경로여야 한다.
+#   - cilium-install.sh가 완료된 상태여야 한다 (Gateway API CRDs + LB IPAM pool).
+#   - cert-manager 또는 manual TLS secret harbor-tls가 준비되어 있어야 한다.
+#     이 스크립트는 Harbor 자체 CA를 harbor-tls Secret으로 변환하여 사용한다.
 #
 # 환경변수:
-#   KUBECONFIG           — 대상 클러스터 kubeconfig (필수)
-#   HARBOR_ADMIN_PASSWORD — Harbor admin 패스워드 (기본: Harbor12345)
-#   HARBOR_NODE_IP       — Harbor nodePort를 노출할 노드 IP (기본: master 자동감지)
-#   HARBOR_NODEPORT_HTTPS — HTTPS NodePort 번호 (기본: 30003)
-#   SSH_KEY_PATH         — 노드 SSH 키 경로 (기본: ~/.ssh/id_ed25519)
-#   VM_USER              — 노드 SSH 사용자 (기본: ubuntu)
+#   KUBECONFIG              — 대상 클러스터 kubeconfig (필수)
+#   HARBOR_ADMIN_PASSWORD   — Harbor admin 패스워드 (기본: Harbor12345)
+#   HARBOR_HOSTNAME         — Harbor 외부 hostname (기본: harbor.lab.local)
+#   HARBOR_GATEWAY_PORT     — Gateway HTTPS 포트 (기본: 443)
+#   SSH_KEY_PATH            — 노드 SSH 키 경로 (기본: ~/.ssh/id_ed25519)
+#   VM_USER                 — 노드 SSH 사용자 (기본: ubuntu)
 #
 # 사용법:
 #   KUBECONFIG=state/test-wizard-env/kubeconfig bash scripts/host/harbor-install.sh
@@ -40,22 +52,16 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 HARBOR_NAMESPACE="${HARBOR_NAMESPACE:-harbor}"
 HARBOR_ADMIN_PASSWORD="${HARBOR_ADMIN_PASSWORD:-Harbor12345}"
-HARBOR_NODEPORT_HTTPS="${HARBOR_NODEPORT_HTTPS:-30003}"
-HARBOR_VALUES="${REPO_ROOT}/k8s/harbor/values.nodeport.yaml"
+HARBOR_HOSTNAME="${HARBOR_HOSTNAME:-harbor.lab.local}"
+HARBOR_GATEWAY_PORT="${HARBOR_GATEWAY_PORT:-443}"
+HARBOR_VALUES="${REPO_ROOT}/k8s/harbor/values.gateway.yaml"
+HARBOR_GATEWAY_MANIFEST="${REPO_ROOT}/k8s/harbor/gateway.yaml"
+HARBOR_ROUTE_MANIFEST="${REPO_ROOT}/k8s/harbor/httproute.yaml"
 LOCAL_PATH_VERSION="v0.0.30"
 SSH_KEY_PATH="${SSH_KEY_PATH:-${HOME}/.ssh/id_ed25519}"
 VM_USER="${VM_USER:-ubuntu}"
 
-# ── 0. master 노드 IP 자동 감지 ───────────────────────────────────────────────
-
-if [[ -z "${HARBOR_NODE_IP:-}" ]]; then
-  HARBOR_NODE_IP=$(kubectl get nodes \
-    -l node-role.kubernetes.io/control-plane \
-    -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-  echo "[harbor-install] auto-detected master IP: ${HARBOR_NODE_IP}"
-fi
-
-HARBOR_EXTERNAL_URL="https://${HARBOR_NODE_IP}:${HARBOR_NODEPORT_HTTPS}"
+HARBOR_EXTERNAL_URL="https://${HARBOR_HOSTNAME}"
 
 echo "[harbor-install] KUBECONFIG=${KUBECONFIG:-<default>}"
 echo "[harbor-install] externalURL: ${HARBOR_EXTERNAL_URL}"
@@ -76,95 +82,127 @@ fi
 
 kubectl create namespace "${HARBOR_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
-# ── 3. helm install (TLS + auto cert) ────────────────────────────────────────
+# ── 3. helm install (ClusterIP + TLS via Gateway) ────────────────────────────
 
-echo "[harbor-install] installing Harbor via Helm (TLS enabled)..."
+echo "[harbor-install] installing Harbor via Helm (ClusterIP, Gateway API TLS)..."
 helm upgrade --install harbor harbor/harbor \
   --namespace "${HARBOR_NAMESPACE}" \
   --values "${HARBOR_VALUES}" \
   --set externalURL="${HARBOR_EXTERNAL_URL}" \
-  --set expose.tls.auto.commonName="${HARBOR_NODE_IP}" \
   --set harborAdminPassword="${HARBOR_ADMIN_PASSWORD}" \
   --timeout 10m \
   --wait
 
 echo "[harbor-install] Harbor pods ready."
 
-# ── 4. Harbor CA 인증서 추출 ──────────────────────────────────────────────────
+# ── 4. Harbor CA cert 추출 → harbor-tls Secret 생성 ─────────────────────────
+#
+# Harbor가 내부적으로 생성하는 CA cert를 Gateway의 TLS termination에 재사용한다.
+# (랩 환경에서 cert-manager 없이 Harbor 자체 CA를 Gateway TLS로 사용)
+# Gateway listener: HTTPS terminate (harbor-tls Secret)
+# Harbor backend: HTTP:80 (TLS 없음, Gateway 뒤에서 plain HTTP)
 
-CA_CERT_TMP=$(mktemp)
-echo "[harbor-install] extracting Harbor CA cert..."
-kubectl get secret harbor-nginx -n "${HARBOR_NAMESPACE}" \
-  -o jsonpath='{.data.ca\.crt}' | base64 -d > "${CA_CERT_TMP}"
+echo "[harbor-install] extracting Harbor CA cert from harbor-nginx secret..."
+CA_CRT=$(kubectl get secret harbor-nginx -n "${HARBOR_NAMESPACE}" \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d)
+TLS_CRT=$(kubectl get secret harbor-nginx -n "${HARBOR_NAMESPACE}" \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d)
+TLS_KEY=$(kubectl get secret harbor-nginx -n "${HARBOR_NAMESPACE}" \
+  -o jsonpath='{.data.tls\.key}' | base64 -d)
 
-if [[ ! -s "${CA_CERT_TMP}" ]]; then
-  echo "[harbor-install] ERROR: CA cert is empty. Harbor TLS secret may not be ready."
-  rm -f "${CA_CERT_TMP}"
+if [[ -z "${TLS_CRT}" || -z "${TLS_KEY}" ]]; then
+  echo "[harbor-install] ERROR: could not extract TLS cert/key from harbor-nginx secret."
   exit 1
 fi
-echo "[harbor-install] CA cert extracted ($(wc -c < "${CA_CERT_TMP}") bytes)."
+echo "[harbor-install] TLS cert extracted."
 
-# ── 5. 모든 노드에 CA 인증서 배포 ────────────────────────────────────────────
+# harbor-tls Secret (Gateway용)
+kubectl create secret tls harbor-tls \
+  --namespace "${HARBOR_NAMESPACE}" \
+  --cert=<(echo "${TLS_CRT}") \
+  --key=<(echo "${TLS_KEY}") \
+  --dry-run=client -o yaml | kubectl apply -f -
+echo "[harbor-install] harbor-tls Secret applied."
+
+# ── 5. Gateway + HTTPRoute 적용 ───────────────────────────────────────────────
+
+echo "[harbor-install] applying Gateway and HTTPRoute..."
+kubectl apply -f "${HARBOR_GATEWAY_MANIFEST}"
+kubectl apply -f "${HARBOR_ROUTE_MANIFEST}"
+
+# Gateway가 LB IP를 할당받을 때까지 대기
+echo "[harbor-install] waiting for Gateway to receive LoadBalancer IP..."
+GATEWAY_IP=""
+for i in $(seq 1 30); do
+  GATEWAY_IP=$(kubectl get gateway harbor-gateway -n "${HARBOR_NAMESPACE}" \
+    -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)
+  if [[ -n "${GATEWAY_IP}" ]]; then
+    echo "[harbor-install] Gateway IP: ${GATEWAY_IP}"
+    break
+  fi
+  echo "[harbor-install]   waiting... (${i}/30)"
+  sleep 5
+done
+
+if [[ -z "${GATEWAY_IP}" ]]; then
+  echo "[harbor-install] WARNING: Gateway did not receive an IP within 150s."
+  echo "[harbor-install] Check: kubectl get gateway harbor-gateway -n harbor"
+else
+  # ── 6. CoreDNS에 harbor.lab.local 등록 ──────────────────────────────────────
+  echo "[harbor-install] updating CoreDNS with ${HARBOR_HOSTNAME} -> ${GATEWAY_IP}..."
+  # NodeHosts ConfigMap 패치 (기존 Corefile에 hosts 블록 추가)
+  EXISTING_COREFILE=$(kubectl get configmap coredns -n kube-system \
+    -o jsonpath='{.data.Corefile}')
+
+  # 이미 harbor.lab.local 항목이 있으면 업데이트, 없으면 추가
+  if echo "${EXISTING_COREFILE}" | grep -q "${HARBOR_HOSTNAME}"; then
+    echo "[harbor-install] CoreDNS entry already exists, skipping."
+  else
+    NEW_COREFILE=$(echo "${EXISTING_COREFILE}" | sed "s|ready|ready\n    hosts {\n        ${GATEWAY_IP} ${HARBOR_HOSTNAME}\n        fallthrough\n    }|")
+    kubectl patch configmap coredns -n kube-system \
+      --type merge \
+      -p "{\"data\":{\"Corefile\":$(echo "${NEW_COREFILE}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}}"
+    kubectl rollout restart deployment/coredns -n kube-system
+    kubectl rollout status deployment/coredns -n kube-system --timeout=60s
+    echo "[harbor-install] CoreDNS updated."
+  fi
+fi
+
+# ── 7. Harbor CA를 모든 노드의 시스템 CA store에 배포 ─────────────────────────
+
+CA_CERT_TMP=$(mktemp)
+echo "${CA_CRT}" > "${CA_CERT_TMP}"
 
 SSH_OPTS="-i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10"
-CERTS_DIR="/etc/containerd/certs.d/${HARBOR_NODE_IP}:${HARBOR_NODEPORT_HTTPS}"
-
 NODE_IPS=$(kubectl get nodes \
   -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}')
 
-echo "[harbor-install] distributing CA cert to nodes: ${NODE_IPS}"
+echo "[harbor-install] distributing Harbor CA cert to nodes: ${NODE_IPS}"
 
 for NODE_IP in ${NODE_IPS}; do
   echo "[harbor-install]   -> ${NODE_IP}"
   scp ${SSH_OPTS} "${CA_CERT_TMP}" "${VM_USER}@${NODE_IP}:/tmp/harbor-ca.crt"
-  # shellcheck disable=SC2029
   ssh ${SSH_OPTS} "${VM_USER}@${NODE_IP}" "
-    # System CA store: most reliable approach — works for ctr, crictl, kubelet, curl.
-    # (containerd v2 certs.d/hosts.toml approach was tried but did not take effect
-    #  even after restart, possibly a containerd v2.2.1 bug with IP:port directory names.)
     sudo cp /tmp/harbor-ca.crt /usr/local/share/ca-certificates/harbor-ca.crt
     sudo update-ca-certificates
     rm -f /tmp/harbor-ca.crt
-
-    # Also keep certs.d entry for compatibility with direct ctr usage.
-    sudo mkdir -p '${CERTS_DIR}'
-    sudo cp /usr/local/share/ca-certificates/harbor-ca.crt '${CERTS_DIR}/ca.crt'
-    sudo tee '${CERTS_DIR}/hosts.toml' > /dev/null <<HOSTS_EOF
-server = \"https://${HARBOR_NODE_IP}:${HARBOR_NODEPORT_HTTPS}\"
-
-[host.\"https://${HARBOR_NODE_IP}:${HARBOR_NODEPORT_HTTPS}\"]
-  ca = \"${CERTS_DIR}/ca.crt\"
-HOSTS_EOF
-    # 이전 HTTP insecure 설정 정리 (v1 설치 잔재)
-    sudo rm -f /etc/containerd/conf.d/registry-config.toml
-    sudo rm -rf '/etc/containerd/certs.d/${HARBOR_NODE_IP}:30002'
     sudo systemctl restart containerd
     sleep 3
     sudo systemctl restart kubelet
-    echo 'done'
+    echo done
   "
 done
 
 rm -f "${CA_CERT_TMP}"
 echo "[harbor-install] CA cert distributed to all nodes."
 
-# ── 6. 클러스터가 안정화될 때까지 대기 ────────────────────────────────────────
+# ── 8. 노드 안정화 대기 ───────────────────────────────────────────────────────
 
 echo "[harbor-install] waiting for nodes to become Ready..."
 sleep 15
 kubectl wait nodes --all --for=condition=Ready --timeout=120s
 
-# ── 7. Harbor API 연결 확인 ───────────────────────────────────────────────────
-
-echo "[harbor-install] verifying Harbor API..."
-if curl -sf -k "${HARBOR_EXTERNAL_URL}/api/v2.0/systeminfo" \
-    -u "admin:${HARBOR_ADMIN_PASSWORD}" > /dev/null; then
-  echo "[harbor-install] Harbor API OK."
-else
-  echo "[harbor-install] WARNING: Harbor API not responding. Check pods."
-fi
-
-# ── 8. GHCR proxy cache 설정 ─────────────────────────────────────────────────
+# ── 9. GHCR proxy cache 설정 ─────────────────────────────────────────────────
 
 HARBOR_API="${HARBOR_EXTERNAL_URL}/api/v2.0"
 
@@ -206,5 +244,10 @@ fi
 echo ""
 echo "[harbor-install] ✓ Done."
 echo "[harbor-install]   UI:         ${HARBOR_EXTERNAL_URL}  (admin / ${HARBOR_ADMIN_PASSWORD})"
-echo "[harbor-install]   proxy pull: ${HARBOR_NODE_IP}:${HARBOR_NODEPORT_HTTPS}/ghcr-io/<image>:<tag>"
-echo "[harbor-install]   example:    kubectl run test --image=${HARBOR_NODE_IP}:${HARBOR_NODEPORT_HTTPS}/ghcr-io/kube-vip/kube-vip:v0.8.9"
+if [[ -n "${GATEWAY_IP:-}" ]]; then
+  echo "[harbor-install]   Gateway IP: ${GATEWAY_IP}"
+  echo "[harbor-install]   DNS entry:  ${HARBOR_HOSTNAME} -> ${GATEWAY_IP}"
+  echo "[harbor-install]   host /etc/hosts: sudo sh -c 'echo \"${GATEWAY_IP} ${HARBOR_HOSTNAME}\" >> /etc/hosts'"
+fi
+echo "[harbor-install]   proxy pull: ${HARBOR_HOSTNAME}/ghcr-io/<image>:<tag>"
+echo "[harbor-install]   example:    kubectl run test --image=${HARBOR_HOSTNAME}/ghcr-io/kube-vip/kube-vip:v0.8.9"
