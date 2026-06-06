@@ -1,0 +1,43 @@
+expose:
+  type: nodePort
+  tls:
+    enabled: false
+  nodePort:
+    name: harbor
+    ports:
+      http:
+        port: 80
+        nodePort: 30002
+      https:
+        port: 443
+        nodePort: 30003
+
+# set to the node IP that Kubernetes hosts resolve to from the host machine
+externalURL: http://192.168.122.7:30002
+
+# admin password passed via --set at install time (not stored here)
+
+persistence:
+  enabled: true
+  storageClass: "local-path"
+  persistentVolumeClaim:
+    registry:
+      size: 20Gi
+    jobservice:
+      jobLog:
+        size: 1Gi
+    database:
+      size: 2Gi
+    redis:
+      size: 1Gi
+    trivy:
+      size: 5Gi
+
+chartmuseum:
+  enabled: false
+
+trivy:
+  enabled: true
+
+updateStrategy:
+  type: Recreate
