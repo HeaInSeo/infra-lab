@@ -140,6 +140,23 @@ CA_CRT=$(cat "${CA_CRT_FILE}")
 
 # ── 5. Gateway + HTTPRoute 적용 ───────────────────────────────────────────────
 
+# GatewayClass가 Accepted=True가 될 때까지 대기 (operator reconcile 시간 필요)
+echo "[harbor-install] waiting for GatewayClass 'cilium' to be Accepted..."
+for i in $(seq 1 24); do
+  STATUS=$(kubectl get gatewayclass cilium \
+    -o jsonpath='{.status.conditions[?(@.type=="Accepted")].status}' 2>/dev/null || true)
+  if [[ "${STATUS}" == "True" ]]; then
+    echo "[harbor-install] GatewayClass accepted."
+    break
+  fi
+  if [[ "${i}" == "12" ]]; then
+    echo "[harbor-install] restarting cilium-operator to trigger reconcile..."
+    kubectl rollout restart deployment/cilium-operator -n kube-system
+  fi
+  echo "[harbor-install]   waiting... (${i}/24)"
+  sleep 5
+done
+
 echo "[harbor-install] applying Gateway and HTTPRoute..."
 kubectl apply -f "${HARBOR_GATEWAY_MANIFEST}"
 kubectl apply -f "${HARBOR_ROUTE_MANIFEST}"
@@ -147,14 +164,14 @@ kubectl apply -f "${HARBOR_ROUTE_MANIFEST}"
 # Gateway가 LB IP를 할당받을 때까지 대기
 echo "[harbor-install] waiting for Gateway to receive LoadBalancer IP..."
 GATEWAY_IP=""
-for i in $(seq 1 30); do
+for i in $(seq 1 36); do
   GATEWAY_IP=$(kubectl get gateway harbor-gateway -n "${HARBOR_NAMESPACE}" \
     -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)
   if [[ -n "${GATEWAY_IP}" ]]; then
     echo "[harbor-install] Gateway IP: ${GATEWAY_IP}"
     break
   fi
-  echo "[harbor-install]   waiting... (${i}/30)"
+  echo "[harbor-install]   waiting... (${i}/36)"
   sleep 5
 done
 
@@ -209,9 +226,18 @@ echo "[harbor-install] CA cert distributed to all nodes."
 echo "[harbor-install] Certs saved to: ${CERT_DIR}"
 
 # ── 8. 노드 안정화 대기 ───────────────────────────────────────────────────────
+# kubelet 재시작 후 API 서버가 일시 불응할 수 있으므로 재연결될 때까지 대기
+
+echo "[harbor-install] waiting for API server to recover after kubelet restart..."
+for i in $(seq 1 24); do
+  if kubectl get nodes >/dev/null 2>&1; then
+    break
+  fi
+  echo "[harbor-install]   API server not ready yet... (${i}/24)"
+  sleep 5
+done
 
 echo "[harbor-install] waiting for nodes to become Ready..."
-sleep 15
 kubectl wait nodes --all --for=condition=Ready --timeout=120s
 
 # ── 9. GHCR proxy cache 설정 ─────────────────────────────────────────────────
