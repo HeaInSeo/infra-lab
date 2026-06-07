@@ -29,7 +29,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SSH_KEY_PATH="${SSH_KEY_PATH:-${HOME}/.ssh/id_ed25519}"
 VM_USER="${VM_USER:-ubuntu}"
-SSH_OPTS="-i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10"
+SSH_OPTS=(-i "${SSH_KEY_PATH}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10)
 
 echo "[flannel-to-cilium] KUBECONFIG=${KUBECONFIG:-<default>}"
 
@@ -66,7 +66,7 @@ echo "[flannel-to-cilium] cleaning Flannel residue on nodes: ${NODE_IPS}"
 for NODE_IP in ${NODE_IPS}; do
   echo "[flannel-to-cilium]   -> ${NODE_IP}"
   # shellcheck disable=SC2029
-  ssh ${SSH_OPTS} "${VM_USER}@${NODE_IP}" \
+  ssh "${SSH_OPTS[@]}" "${VM_USER}@${NODE_IP}" \
     "sudo ip link delete flannel.1 2>/dev/null || true
      sudo rm -f /etc/cni/net.d/10-flannel.conflist
      sudo rm -f /run/flannel/subnet.env

@@ -136,8 +136,6 @@ kubectl create secret tls harbor-tls \
   --dry-run=client -o yaml | kubectl apply -f -
 echo "[harbor-install] harbor-tls Secret applied."
 
-CA_CRT=$(cat "${CA_CRT_FILE}")
-
 # ── 5. Gateway + HTTPRoute 적용 ───────────────────────────────────────────────
 
 # GatewayClass가 Accepted=True가 될 때까지 대기 (operator reconcile 시간 필요)
@@ -189,6 +187,7 @@ else
   if echo "${EXISTING_COREFILE}" | grep -q "${HARBOR_HOSTNAME}"; then
     echo "[harbor-install] CoreDNS entry already exists, skipping."
   else
+    # shellcheck disable=SC2001
     NEW_COREFILE=$(echo "${EXISTING_COREFILE}" | sed "s|ready|ready\n    hosts {\n        ${GATEWAY_IP} ${HARBOR_HOSTNAME}\n        fallthrough\n    }|")
     kubectl patch configmap coredns -n kube-system \
       --type merge \
@@ -201,7 +200,7 @@ fi
 
 # ── 7. Harbor CA를 모든 노드의 시스템 CA store에 배포 ─────────────────────────
 
-SSH_OPTS="-i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10"
+SSH_OPTS=(-i "${SSH_KEY_PATH}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10)
 NODE_IPS=$(kubectl get nodes \
   -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}')
 
@@ -209,8 +208,8 @@ echo "[harbor-install] distributing Harbor CA cert to nodes: ${NODE_IPS}"
 
 for NODE_IP in ${NODE_IPS}; do
   echo "[harbor-install]   -> ${NODE_IP}"
-  scp ${SSH_OPTS} "${CA_CRT_FILE}" "${VM_USER}@${NODE_IP}:/tmp/harbor-ca.crt"
-  ssh ${SSH_OPTS} "${VM_USER}@${NODE_IP}" "
+  scp "${SSH_OPTS[@]}" "${CA_CRT_FILE}" "${VM_USER}@${NODE_IP}:/tmp/harbor-ca.crt"
+  ssh "${SSH_OPTS[@]}" "${VM_USER}@${NODE_IP}" "
     sudo cp /tmp/harbor-ca.crt /usr/local/share/ca-certificates/harbor-ca.crt
     sudo update-ca-certificates
     rm -f /tmp/harbor-ca.crt
