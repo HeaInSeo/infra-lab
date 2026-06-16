@@ -177,6 +177,17 @@ if [[ -z "${GATEWAY_IP}" ]]; then
   echo "[harbor-install] WARNING: Gateway did not receive an IP within 150s."
   echo "[harbor-install] Check: kubectl get gateway harbor-gateway -n harbor"
 else
+  FIRST_NODE_IP=$(kubectl get nodes \
+    -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+  ROUTE_DEV=$(ip route get "${FIRST_NODE_IP}" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1)}' | head -1)
+  if [[ -n "${ROUTE_DEV}" ]]; then
+    echo "[harbor-install] updating host route for ${GATEWAY_IP}/32 via ${ROUTE_DEV}..."
+    sudo ip route replace "${GATEWAY_IP}/32" dev "${ROUTE_DEV}"
+  fi
+  echo "[harbor-install] updating host /etc/hosts with ${HARBOR_HOSTNAME} -> ${GATEWAY_IP}..."
+  sudo sed -i "/[[:space:]]${HARBOR_HOSTNAME//./\\.}$/d" /etc/hosts
+  echo "${GATEWAY_IP} ${HARBOR_HOSTNAME}" | sudo tee -a /etc/hosts >/dev/null
+
   # ── 6. CoreDNS에 harbor.lab.local 등록 ──────────────────────────────────────
   echo "[harbor-install] updating CoreDNS with ${HARBOR_HOSTNAME} -> ${GATEWAY_IP}..."
   # NodeHosts ConfigMap 패치 (기존 Corefile에 hosts 블록 추가)
