@@ -12,7 +12,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 CILIUM_VERSION="${CILIUM_VERSION:-1.16.5}"
-GATEWAY_API_VERSION="${GATEWAY_API_VERSION:-v1.2.0}"
+GATEWAY_API_VERSION="${GATEWAY_API_VERSION:-v1.1.0}"
 CILIUM_NS="${CILIUM_NS:-kube-system}"
 
 echo "[INFO] install optional addon: cilium ${CILIUM_VERSION}"
@@ -26,7 +26,7 @@ fi
 # ── 1. Gateway API CRD 설치 ────────────────────────────────────────────────
 echo "[INFO] installing Gateway API CRDs ${GATEWAY_API_VERSION}"
 kubectl apply -f \
-  "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
+  "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/experimental-install.yaml"
 
 # ── 2. Cilium Helm repo ────────────────────────────────────────────────────
 helm repo add cilium https://helm.cilium.io/ --force-update

@@ -186,7 +186,7 @@ Each VM receives `/etc/infra-lab/build.json` after `env-up`:
   "cni": "flannel",
   "role": "control-plane",
   "nodeName": "lab-master-0",
-  "kubernetesVersion": "v1.32.5",
+  "kubernetesVersion": "v1.36.2",
   "createdAt": "2026-06-05T00:00:00Z"
 }
 ```
@@ -210,6 +210,50 @@ Addons are separated into two categories.
 ```bash
 ./scripts/k8s-tool.sh addons-install optional local-path-storage
 ./scripts/k8s-tool.sh addons-verify optional local-path-storage
+```
+
+## Kubernetes User Namespaces Baseline
+
+The lab baseline pins Kubernetes to `1.36.2` so workloads can rely on
+Kubernetes User Namespaces as a stable API (`spec.hostUsers: false`).
+The Ubuntu 24.04 guest image currently provides a Linux 6.8 kernel,
+and the baseline installs containerd from the Ubuntu repositories.
+
+Before using this lab for User Namespace work, verify the live VM nodes:
+
+```bash
+kubectl get nodes -o wide
+kubectl explain pod.spec.hostUsers
+```
+
+Expected baseline:
+
+| Component | Required baseline |
+|-----------|-------------------|
+| Kubernetes | `v1.36.x` |
+| Linux kernel | `6.3+` (`6.8.x` on Ubuntu 24.04 guests) |
+| container runtime | `containerd 2.0+` |
+| OCI runtime | `crun 1.28` as the containerd default runtime (`/usr/local/bin/crun`) |
+
+Kubernetes documents lower runtime bounds, but this lab pins `crun 1.28`.
+The Ubuntu 24.04 `crun 1.14.1` package failed to recreate Kubernetes 1.36
+static pod sandboxes after a containerd restart in this VM path
+(`OCI runtime create failed: unknown version specified`). Bootstrap installs
+the official `containers/crun` amd64 binary and verifies its SHA256 before
+using it as containerd's default runtime.
+
+Harbor is cluster-local state. Rebuilding the VM cluster removes Harbor and
+its proxy cache configuration, so reinstall Harbor after every rebuild and
+verify the GHCR proxy cache:
+
+```bash
+source ~/.config/infra-lab/harbor-secrets.env
+KUBECONFIG=state/<env>/kubeconfig bash scripts/host/harbor-install.sh
+kubectl run ghcr-test \
+  --image="${HARBOR_HOSTNAME}/ghcr-io/kube-vip/kube-vip:v0.8.9" \
+  --restart=Never
+kubectl describe pod ghcr-test | grep -E 'Pulled|Failed|Error'
+kubectl delete pod ghcr-test
 ```
 
 ## Makefile reference
@@ -284,7 +328,7 @@ HOST_PROFILE=envs/multipass-flannel.env ./scripts/k8s-tool.sh up
 
 ## Reproducibility
 
-- Kubernetes packages pinned to `1.32.5` in `cloud-init/k8s.yaml`
+- Kubernetes packages pinned to `1.36.2` in `cloud-init/k8s.yaml`
 - `local-path-storage` pinned to `v0.0.28`
 - Provider versions locked in `.terraform.lock.hcl` (committed)
 - Ubuntu 24.04 LTS guest image

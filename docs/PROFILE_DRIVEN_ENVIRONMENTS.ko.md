@@ -44,7 +44,7 @@ vm:
     disk: <string>
 
 kubernetes:
-  version: "1.32"        # NOTE: Phase 1에서는 참조용. cloud-init/k8s.yaml 값이 우선됨.
+  version: "1.36"        # NOTE: Phase 1에서는 참조용. cloud-init/k8s.yaml 값이 우선됨.
   cni: flannel | cilium
 
 addons:
