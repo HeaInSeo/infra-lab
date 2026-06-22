@@ -17,7 +17,7 @@ vm:
     disk: 50G
 
 kubernetes:
-  version: "1.32"   # NOTE: 현재는 cloud-init/k8s.yaml의 값이 우선됨. Phase 2에서 변수화 예정.
+  version: "1.36"   # NOTE: 현재는 cloud-init/k8s.yaml의 값이 우선됨. Phase 2에서 변수화 예정.
   cni: flannel
 
 addons:

@@ -462,3 +462,119 @@ L4 smoke   ✅  K8s Job nfsmoke-xxxx 실행 → "smoke-ok" 출력 → 성공
 ```
 
 전체 BuildAndRegister 파이프라인이 처음으로 end-to-end 성공했습니다.
+
+---
+
+### 2026-06-21: NodeVault 인-Pod 빌드가 27시간 이상 멈춤 (조사 진행 중)
+
+**현상**
+
+`nodevault-controlplane` Pod에서 제출된 두 빌드(`test-alpine-tool`, `test-bad-dockerfile`)가
+거의 동시(24ms 차이)에 시작된 뒤, 이후 27시간 이상 로그가 전혀 추가되지 않고 멈춤.
+두 빌드 모두 성공/실패 로그 없이 무한 대기 상태.
+
+**처음 세운 가설과 반증 (오류 정정)**
+
+1. (오류) Cilium L2 announcement policy가 죽은 `mpqemubr0` 인터페이스를 참조해서 Harbor가
+   네트워크적으로 단절됐다고 추정했음. → 실제 live policy(`lab-default-l2`, 2026-06-16 재생성)는
+   `mpqemubr0`을 전혀 참조하지 않음(정규식 `^eth.*|^enp.*|^ens.*` 기반 인터페이스 매칭).
+   28일 전 stale snapshot 문서(`profiles/remote-seoy/cilium/live-snapshot/`)를 live 상태로
+   잘못 신뢰한 결과였음.
+2. (오류) Harbor가 네트워크적으로 전반적으로 도달 불가능하다고 추정했음. → `https://harbor.lab.local/v2/`
+   경로는 seoy 호스트와 Pod 내부 양쪽 모두에서 정상(401 Unauthorized, 수십 ms 내 응답).
+   단, HTTP:80 listener는 2026-06-16 클러스터 재구축 이후 실제로 사라짐(Gateway가 443만 노출) —
+   이 사실 자체는 맞지만, Buildah는 기본적으로 HTTPS를 사용하므로(`registries.conf`에
+   `harbor.lab.local`용 `insecure=true` override 없음) 빌드 멈춤의 원인은 아닌 것으로 확인됨.
+
+**실제로 확인된 사실**
+
+- Harbor가 제시하는 TLS 인증서는 `harbor-lab-ca`(2026-06-16 발급, 자체서명)이며,
+  `nodevault-controlplane` Pod 안에는 이 CA를 신뢰하는 경로가 전혀 없음
+  (`/etc/containers/certs.d/`, `/etc/pki/ca-trust/source/anchors/` 모두 비어 있음,
+  Deployment에도 CA를 주입하는 볼륨 마운트 없음, NodeVault 코드에도
+  `certs.d`/`harbor-ca`/`InsecureSkipVerify` 참조가 전혀 없음).
+- 다만 실제 TLS 검증을 수행하는 클라이언트(curl)로 동일 조건을 재현하면
+  `unable to get local issuer certificate`로 0.15초 안에 빠르게 실패함 — 즉 CA 미신뢰
+  자체만으로는 "27시간 멈춤" 현상이 설명되지 않음.
+- NodeVault `pkg/build/builder.go`의 `podbridge5Builder`는 Service 시작 시 단 하나의
+  `storage.Store` 인스턴스를 생성해 모든 빌드 요청이 이를 공유하며, Go 레벨 mutex로
+  보호되지 않음.
+- `pkg/build/submit_tool_build.go:167`의 `startSubmittedBuild`는 빌드마다
+  `context.WithCancel(context.Background())`만 사용 — 데드라인이 전혀 없음.
+  `CancelToolBuild` RPC를 명시적으로 호출하지 않으면 영원히 취소되지 않음.
+- 거의 동시에(24ms 차이) 제출된 두 빌드가 같은 `store`에 동시 접근했고,
+  `/var/lib/nodevault/containers` 밑 `overlay/l`, `overlay-images`, `overlay-containers`에는
+  lock 파일만 있고 실제 레이어 데이터가 전혀 없음 — 두 빌드 모두 매우 초기 단계에서
+  멈춘 것으로 보임.
+
+**현재 가장 유력한 가설 (미확정)**
+
+`test-bad-dockerfile`(의도적으로 잘못된 Dockerfile로 보임)을 처리하는 과정에서
+podbridge5/Buildah 내부 로직이 lock을 쥔 채로 멈췄고, 같은 `store`를 공유하는
+`test-alpine-tool` 빌드가 그 lock을 기다리며 같이 멈춰 있을 가능성이 있음.
+두 빌드 모두 deadline이 없는 context이므로 영원히 풀리지 않음.
+
+**다음 단계 (제안, 아직 미실행 — 운영자 승인 필요)**
+
+1. `nodevault-controlplane` Pod 재시작으로 멈춘 빌드 상태 초기화 (현재 운영 중인 Pod이므로 승인 필요).
+2. 빌드를 동시에 두 개 제출하지 않고 하나씩 순차 제출해서 재현되는지 확인.
+3. (코드 수정 제안, 별도 승인 필요) `builder.go`에 store 접근 직렬화(mutex) 추가,
+   `submit_tool_build.go`의 빌드 context에 최대 빌드 시간 데드라인 추가.
+
+**참고**: 이 항목은 라이브 클러스터 진단 결과를 기록한 것으로, 위 항목들과 달리 아직
+커밋으로 해결되지 않은 진행 중 조사 내용입니다. 결론이 나면 이 섹션을 갱신하거나
+별도 "수정" 섹션을 추가할 것.
+
+**[2026-06-21 추가 업데이트] 근본 원인 확정: overlay mount `userxattr: invalid argument`**
+
+Pod를 재시작한 뒤 빌드를 동시에 두 개가 아니라 **하나만** 공식 통합 테스트
+(`go test -tags "integration exclude_graphdriver_btrfs containers_image_openpgp
+exclude_graphdriver_devicemapper" -run TestBuildAndRegister_SimpleDockerfile ...`)로
+제출해 재현한 결과, 빌드는 **멈추지 않고 0.03초 안에 즉시, 깨끗하게 실패**했습니다:
+
+```
+[BUILD_EVENT_KIND_FAILED] build image: imagebuildah.BuildDockerfiles: imagebuildah.BuildDockerfiles:
+mounting an overlay over build context directory: creating overlay scaffolding for build context
+directory: mount overlay:/var/tmp/buildah-context-.../merge, data: lowerdir=/,
+upperdir=/var/tmp/buildah-context-.../upper, workdir=/var/tmp/buildah-context-.../work,
+userxattr: invalid argument
+```
+
+이로써 이전에 세운 "두 빌드가 동시에 제출되어 store lock을 두고 경쟁/교착 상태에
+빠졌다"는 가설은 단일 빌드만으로도 즉시 재현되므로 **불필요한 가설이었음이 확인**됐습니다.
+(다만 두 빌드가 동시에 이 실패 경로를 타면서 lock 정리가 제대로 안 되어 실제 27시간
+멈춤으로 이어졌을 가능성은 남아 있음 — 아래 "남은 의문" 참고)
+
+**원인 분석**
+
+Buildah가 build context 디렉터리를 overlay로 감싸는 과정에서 `lowerdir=/`
+(컨테이너 자신의 root 파일시스템)을 lower layer로 사용하려 시도합니다.
+이 root 파일시스템 자체가 이미 containerd(`containerd://2.2.1`)의 overlayfs
+storage driver로 마운트된 상태이므로, 그 위에 다시 overlay를 쌓는
+"overlay-on-overlay 중첩" 시도가 됩니다. `lab-worker-0` 노드
+(Ubuntu 24.04.4, 커널 `6.8.0-117-generic`)에서 이 중첩 마운트 시
+`userxattr` 옵션이 거부되어 `invalid argument`로 실패합니다.
+
+커널 자체는 충분히 최신(6.8)이라 `userxattr` 기능 자체가 없는 문제는 아니며,
+containerd의 overlay 마운트 옵션과 Buildah가 기대하는 중첩 overlay 옵션 간의
+호환성 문제로 보입니다.
+
+**남은 의문**
+
+- 이 "즉시 실패" 경로와, 2026-06-20에 관찰된 "27시간 동안 로그 없이 멈춤" 현상이
+  정확히 같은 코드 경로인지는 아직 100% 확인되지 않았습니다. 가능성: 동일한
+  overlay 실패가 두 빌드에서 동시에 발생했을 때, 에러 처리/락 해제 경로에 버그가 있어
+  cleanup이 안 끝나고 멈췄을 수 있습니다.
+- 이 부분은 코드 수정(재현 + 수정) 없이는 결론을 내리기 어려우며, 별도 승인 후
+  진행 여부를 결정해야 합니다.
+
+**다음 단계 제안 (미실행, 승인 필요)**
+
+1. `pkg/build/builder.go` 또는 podbridge5 쪽에서 build-context overlay 단계를
+   우회/비활성화할 수 있는 옵션이 있는지 확인 (예: `--jobs=1`, context를 tar로
+   복사하는 방식 등 overlay 없이 build context를 준비하는 대안).
+2. 위 옵션이 없다면 containerd의 overlay 마운트 옵션(`metacopy`, `index` 등)을
+   조정해 nested overlay가 가능하도록 노드 설정을 바꿔야 할 수도 있음 — 이는
+   infra-lab의 cloud-init/containerd 설정 변경이 필요한 더 큰 작업.
+3. `submit_tool_build.go`의 빌드 context에 데드라인을 추가하는 것은 이 특정
+   실패와 무관하게 여전히 권장되는 방어적 수정.

@@ -135,7 +135,7 @@ ilab k8s status [env]           # kubectl nodes + pods
   "cni": "flannel",
   "role": "control-plane",
   "nodeName": "lab-master-0",
-  "kubernetesVersion": "v1.32.5",
+  "kubernetesVersion": "v1.36.2",
   "createdAt": "2026-06-05T00:00:00Z"
 }
 ```
@@ -159,6 +159,50 @@ ilab k8s status [env]           # kubectl nodes + pods
 ```bash
 ./scripts/k8s-tool.sh addons-install optional local-path-storage
 ./scripts/k8s-tool.sh addons-verify optional local-path-storage
+```
+
+## Kubernetes User Namespace 기준
+
+이 랩의 Kubernetes baseline은 `1.36.2`로 고정한다. NodeVault 같은 상위
+프로젝트가 Kubernetes User Namespace를 안정 API(`spec.hostUsers: false`)로
+전제하기 위한 기준이다. Ubuntu 24.04 게스트는 현재 Linux 6.8 커널을 제공하고,
+containerd는 Ubuntu repository에서 설치한다.
+
+User Namespace 작업 전에 실제 VM 노드에서 아래를 확인한다:
+
+```bash
+kubectl get nodes -o wide
+kubectl explain pod.spec.hostUsers
+```
+
+기대 baseline:
+
+| 항목 | 기준 |
+|------|------|
+| Kubernetes | `v1.36.x` |
+| Linux kernel | `6.3+` (Ubuntu 24.04 게스트는 `6.8.x`) |
+| container runtime | `containerd 2.0+` |
+| OCI runtime | `crun 1.28`을 containerd 기본 runtime으로 사용(`/usr/local/bin/crun`) |
+
+Kubernetes 문서의 runtime 하한선은 더 낮지만, 이 lab은 `crun 1.28`로 고정한다.
+Ubuntu 24.04 기본 `crun 1.14.1` 패키지는 이 VM 경로에서 containerd 재시작 후
+Kubernetes 1.36 static pod sandbox 재생성에 실패했다
+(`OCI runtime create failed: unknown version specified`). Bootstrap은 공식
+`containers/crun` amd64 바이너리를 SHA256 검증 후 설치하고, 이를 containerd
+기본 runtime으로 사용한다.
+
+Harbor는 클러스터 내부 상태다. VM 클러스터를 rebuild하면 Harbor와 proxy cache
+설정도 사라지므로, 매 rebuild 후 Harbor를 다시 설치하고 GHCR proxy cache를
+검증한다:
+
+```bash
+source ~/.config/infra-lab/harbor-secrets.env
+KUBECONFIG=state/<env>/kubeconfig bash scripts/host/harbor-install.sh
+kubectl run ghcr-test \
+  --image="${HARBOR_HOSTNAME}/ghcr-io/kube-vip/kube-vip:v0.8.9" \
+  --restart=Never
+kubectl describe pod ghcr-test | grep -E 'Pulled|Failed|Error'
+kubectl delete pod ghcr-test
 ```
 
 ## Makefile 레퍼런스
@@ -227,7 +271,7 @@ K8sGPT CLI 기반 클러스터 진단 절차는 [docs/K8SGPT_CLI_REMOTE_DIAGNOSI
 
 ## 재현성
 
-- Kubernetes 패키지: `cloud-init/k8s.yaml`에서 `1.32.5` 고정
+- Kubernetes 패키지: `cloud-init/k8s.yaml`에서 `1.36.2` 고정
 - `local-path-storage`: `v0.0.28` 고정
 - Provider 버전: `.terraform.lock.hcl` 커밋으로 고정
 - 게스트 이미지: Ubuntu 24.04 LTS
