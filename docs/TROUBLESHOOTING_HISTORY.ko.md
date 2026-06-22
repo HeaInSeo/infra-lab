@@ -578,3 +578,84 @@ containerd의 overlay 마운트 옵션과 Buildah가 기대하는 중첩 overlay
    infra-lab의 cloud-init/containerd 설정 변경이 필요한 더 큰 작업.
 3. `submit_tool_build.go`의 빌드 context에 데드라인을 추가하는 것은 이 특정
    실패와 무관하게 여전히 권장되는 방어적 수정.
+
+**[2026-06-22 후속 업데이트] 위 1번 제안 사항 구현 완료**
+
+위 "다음 단계 제안"의 1번(build-context overlay 우회)은 NodeVault
+`pkg/build/builder.go`에서 build-context lowerdir을 컨테이너 root(`/`)가 아닌
+전용 디렉터리(`/tmp/nodevault-build/context`, `/tmp` emptyDir 마운트 위)로 분리하는
+방식으로 구현·검증 완료되었습니다. `lowerdir=/`을 쓰지 않게 되어 containerd의
+root overlay 위에 또 다른 overlay를 중첩하는 상황 자체가 사라졌습니다(2번 제안의
+containerd 설정 변경은 불필요해졌습니다). 3번(빌드 데드라인 추가)은 여전히 미실행
+상태입니다. 상세 내용: `HeaInSeo/NodeVault` issue #4.
+
+## 2026-06-22: NodeVault(구 NodeForge) in-Pod 빌더 — Harbor 자체서명 CA 신뢰 갭
+
+### 배경
+
+NodeVault(이 저장소 11번 항목의 NodeForge가 이후 K8s in-Pod 빌드 방식으로 다시 전환된
+프로젝트)의 overlay/userns 버그를 고친 뒤 라이브 통합 테스트를 재실행하자, build가 pull
+단계까지 도달한 뒤 다음 에러로 막혔습니다.
+
+```
+initializing source docker://harbor.lab.local/nodevault/controlplane:latest:
+pinging container registry harbor.lab.local: Get "https://harbor.lab.local/v2/":
+tls: failed to verify certificate: x509: certificate signed by unknown authority
+```
+
+### 원인
+
+`harbor-install.sh`가 각 **노드**의 containerd 트러스트(certs.d)에 Harbor CA를 배포하므로,
+kubelet의 일반 `imagePullPolicy` pull은 문제없이 동작합니다. 하지만 NodeVault처럼 **Pod
+내부**에서 Buildah/Podman이 직접 Harbor에 pull/push하는 워크로드는 이 노드 레벨 신뢰
+설정을 공유하지 않습니다 — Pod는 별도 파일시스템/프로세스이기 때문입니다. NodeVault가
+쓰는 podbridge5(Buildah Go API 래퍼)는 `types.SystemContext`의 `DockerCertPath`를 채우지
+않으므로 `go.podman.io/image/v5`의 기본 탐색 경로인
+`/etc/containers/certs.d/<registry-domain>/*.crt`로 떨어지는데, 거기에는 아무것도
+마운트되어 있지 않았습니다.
+
+### 수정
+
+`infra-lab`/Harbor 설치 절차의 결함이 아니라 **각 소비 워크로드가 자기 책임으로
+마운트해야 하는 부분**입니다 — infra-lab 쪽에서 일괄 해결할 수 없습니다(어떤 Pod가 자체
+레지스트리 클라이언트를 갖는지는 워크로드마다 다릅니다). NodeVault 쪽 수정은 K8s Secret +
+volumeMount만으로 충분했습니다(코드 변경 없음):
+
+```bash
+kubectl create secret generic <name>-harbor-ca \
+  --from-file=ca.crt=~/.config/infra-lab/certs/harbor-ca.crt \
+  -n <namespace>
+```
+
+```yaml
+volumeMounts:
+  - name: harbor-ca
+    mountPath: /etc/containers/certs.d/harbor.lab.local
+    readOnly: true
+volumes:
+  - name: harbor-ca
+    secret:
+      secretName: <name>-harbor-ca
+```
+
+라이브 클러스터에서 Secret 생성 + 매니페스트 재적용 후 공식 통합 테스트로 검증했고,
+build → push → digest → L3 dry-run → L4 smoke run → 카탈로그 등록까지 전 구간이 TLS
+에러 없이 통과했습니다. 전체 분석과 검증 로그는 `HeaInSeo/NodeVault` issue #2(overlay),
+#3(이 Harbor CA 갭), #4(후속 build-context 디렉터리 정리)에 기록되어 있습니다.
+
+### 남은 갭 (비차단)
+
+`net/http`/시스템 CA 풀을 쓰는 클라이언트(NodeVault의 ORAS referrer push 등)는 위 마운트로
+해결되지 않습니다 — 시스템 트러스트 스토어(`/etc/ssl/certs`, `update-ca-certificates`)에
+별도로 추가해야 합니다. NodeVault에서는 이 경로가 이미 의도적으로 비차단
+(`integrity_health=Partial`) 처리되어 있어 당장 막힌 곳은 아니지만, 일반 해결책은 아직
+없습니다.
+
+### 교훈
+
+- "노드가 Harbor CA를 신뢰한다"와 "Pod 내부 프로세스가 Harbor CA를 신뢰한다"는 별개의
+  신뢰 경계입니다. kubelet의 `imagePullPolicy` pull이 성공한다고 해서 Pod 안에서 직접
+  레지스트리에 붙는 코드도 성공한다고 가정하면 안 됩니다.
+- containers/image 계열 라이브러리(Buildah, Podman, skopeo)와 순수 `net/http` 기반
+  클라이언트는 서로 다른 CA 신뢰 경로를 탐색합니다 — 하나를 고쳤다고 둘 다 고쳐지지
+  않습니다.
