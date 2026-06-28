@@ -99,6 +99,12 @@ test-go:
 	@cd ilab && go test ./...
 	@echo "[OK] test-go"
 
+.PHONY: test-contract
+test-contract:
+	@echo "==> ilab JSON contract tests"
+	@cd ilab && go test ./...
+	@echo "[OK] test-contract"
+
 .PHONY: help
 help:
 	@echo "Lint targets (default: check):"
@@ -108,6 +114,7 @@ help:
 	@echo "  lint-hcl    tofu fmt + tofu validate"
 	@echo "  lint-go     gofmt + go vet + go build"
 	@echo "  test-go     go test ./..."
+	@echo "  test-contract  Validate ilab JSON contract tests"
 	@echo ""
 	@echo "Environment targets:"
 	@echo "  env-up      Create cluster    (ENV_PROFILE=envs/<name>.env)"

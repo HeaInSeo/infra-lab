@@ -1,0 +1,14 @@
+{
+  "ok": false,
+  "command": "profile.validate",
+  "contractVersion": "infra-lab.contract/v1",
+  "data": null,
+  "warnings": [],
+  "errors": [
+    {
+      "code": "PROFILE_INVALID",
+      "message": "libvirt.sshPublicKey is required",
+      "field": "libvirt.sshPublicKey"
+    }
+  ]
+}

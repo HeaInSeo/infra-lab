@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "command": "capabilities",
+  "contractVersion": "infra-lab.contract/v1",
+  "data": {
+    "infraLabVersion": "dev",
+    "contractVersion": "infra-lab.contract/v1",
+    "capabilities": [
+      "version.v1",
+      "capabilities.v1",
+      "doctor.v1",
+      "env.list.v1",
+      "env.status.v1",
+      "profile.list.v1",
+      "profile.show.v1",
+      "profile.validate.v1",
+      "k8s.status.v1",
+      "vm.list.v1",
+      "vm.version.v1"
+    ]
+  },
+  "warnings": [],
+  "errors": []
+}
