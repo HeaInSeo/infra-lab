@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/HeaInSeo/infra-lab/ilab/internal/lab"
+	"github.com/HeaInSeo/infra-lab/ilab/internal/output"
 )
 
 var profileCmd = &cobra.Command{
@@ -157,9 +158,15 @@ func runProfileNew(_ *cobra.Command, args []string) error {
 
 // runProfileShow pretty-prints the YAML for a named profile.
 func runProfileShow(_ *cobra.Command, args []string) error {
-	p, err := lab.LoadProfile(args[0])
+	p, err := loadProfileForOutput(args[0])
 	if err != nil {
 		return err
+	}
+	if wantsJSON() {
+		return output.WriteJSON(os.Stdout, output.Success("profile.show", profileShowData{
+			Profile: profileRef(args[0], p),
+			Spec:    profileNormalized(p),
+		}))
 	}
 	data, err := yaml.Marshal(p)
 	if err != nil {
@@ -171,11 +178,38 @@ func runProfileShow(_ *cobra.Command, args []string) error {
 
 // runProfileValidate validates a profile's required fields and prints errors.
 func runProfileValidate(_ *cobra.Command, args []string) error {
-	p, err := lab.LoadProfile(args[0])
+	p, err := loadProfileForOutput(args[0])
 	if err != nil {
 		return err
 	}
 	errs := p.Validate()
+	if wantsJSON() {
+		conditions := []conditionData{{
+			Type:   "SchemaValid",
+			Status: "True",
+			Reason: "ValidationPassed",
+		}}
+		if len(errs) > 0 {
+			conditions = []conditionData{{
+				Type:    "SchemaValid",
+				Status:  "False",
+				Reason:  "ValidationFailed",
+				Message: "profile validation failed",
+			}}
+			return &output.ContractError{
+				Code:    "PROFILE_INVALID",
+				Message: "profile validation failed",
+				Exit:    output.ExitDomain,
+				Infos:   contractErrors("PROFILE_INVALID", errs),
+			}
+		}
+		return output.WriteJSON(os.Stdout, output.Success("profile.validate", profileValidateData{
+			Profile:    profileRef(args[0], p),
+			Valid:      true,
+			Normalized: profileNormalized(p),
+			Conditions: conditions,
+		}))
+	}
 	if len(errs) == 0 {
 		fmt.Printf("Profile %q is valid.\n", p.Name)
 		return nil
@@ -185,6 +219,17 @@ func runProfileValidate(_ *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "  - %s\n", e)
 	}
 	return fmt.Errorf("profile validation failed")
+}
+
+func loadProfileForOutput(arg string) (*lab.Profile, error) {
+	if !wantsJSON() {
+		return lab.LoadProfile(arg)
+	}
+	location, err := lab.ResolveProfileLocation(arg)
+	if err != nil {
+		return nil, output.WrapError("PROFILE_NOT_FOUND", err.Error(), output.ExitDomain, err)
+	}
+	return lab.LoadProfile(location.Path)
 }
 
 // readSSHPublicKey reads the public key from <privKeyPath>.pub.
@@ -199,22 +244,49 @@ func readSSHPublicKey(privKeyPath string) (string, error) {
 
 // runProfileList lists profiles from ~/.config/infra-lab/profiles/ and <repo>/envs/*.yaml.
 func runProfileList(_ *cobra.Command, _ []string) error {
-	var profiles []string
+	profiles := listProfiles()
 
-	// ~/.config/infra-lab/profiles/
+	if wantsJSON() {
+		return output.WriteJSON(os.Stdout, output.Success("profile.list", profileListData{Profiles: profiles}))
+	}
+
+	var paths []string
+	for _, p := range profiles {
+		paths = append(paths, p.Path)
+	}
+
+	if len(paths) == 0 {
+		fmt.Println("No profiles found.")
+		fmt.Println("hint: copy an example from envs/*.yaml.example and fill in your values.")
+		return nil
+	}
+
+	for _, p := range paths {
+		fmt.Println(p)
+	}
+	return nil
+}
+
+func listProfiles() []profileListItemData {
+	profiles := []profileListItemData{}
+
 	home, _ := os.UserHomeDir()
 	if home != "" {
 		userDir := filepath.Join(home, ".config", "infra-lab", "profiles")
 		if entries, err := os.ReadDir(userDir); err == nil {
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") {
-					profiles = append(profiles, filepath.Join(userDir, e.Name()))
+					path := filepath.Join(userDir, e.Name())
+					profiles = append(profiles, profileListItemData{
+						Name:   strings.TrimSuffix(e.Name(), ".yaml"),
+						Source: "user",
+						Path:   path,
+					})
 				}
 			}
 		}
 	}
 
-	// <repo>/envs/*.yaml
 	root, err := lab.FindRoot()
 	if err == nil {
 		envsDir := filepath.Join(root, "envs")
@@ -222,22 +294,18 @@ func runProfileList(_ *cobra.Command, _ []string) error {
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") &&
 					!strings.HasSuffix(e.Name(), ".yaml.example") {
-					profiles = append(profiles, filepath.Join(envsDir, e.Name()))
+					path := filepath.Join(envsDir, e.Name())
+					profiles = append(profiles, profileListItemData{
+						Name:   strings.TrimSuffix(e.Name(), ".yaml"),
+						Source: "repo",
+						Path:   path,
+					})
 				}
 			}
 		}
 	}
 
-	if len(profiles) == 0 {
-		fmt.Println("No profiles found.")
-		fmt.Println("hint: copy an example from envs/*.yaml.example and fill in your values.")
-		return nil
-	}
-
-	for _, p := range profiles {
-		fmt.Println(p)
-	}
-	return nil
+	return profiles
 }
 
 // runProfileClone copies src profile to dst, updating name and state.dir.

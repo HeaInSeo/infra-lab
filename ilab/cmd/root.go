@@ -14,8 +14,14 @@ import (
 var jsonOutput bool
 
 var jsonCapableCommands = map[string]bool{
-	"version":      true,
-	"capabilities": true,
+	"version":          true,
+	"capabilities":     true,
+	"doctor":           true,
+	"env.list":         true,
+	"env.status":       true,
+	"profile.list":     true,
+	"profile.show":     true,
+	"profile.validate": true,
 }
 
 var rootCmd = &cobra.Command{
@@ -50,7 +56,7 @@ func Execute() {
 		exitCode := exitCodeFor(err)
 		if wantsJSON() {
 			command := contractCommandName(cmd)
-			env := output.Failure(command, []output.ErrorInfo{errorInfoFor(err)})
+			env := output.Failure(command, errorInfosFor(err))
 			if writeErr := output.WriteJSON(os.Stdout, env); writeErr != nil {
 				fmt.Fprintf(os.Stderr, "Error: write JSON response: %v\n", writeErr)
 				os.Exit(output.ExitRuntime)
@@ -100,14 +106,22 @@ func contractCommandName(cmd *cobra.Command) string {
 }
 
 func errorInfoFor(err error) output.ErrorInfo {
+	infos := errorInfosFor(err)
+	if len(infos) == 0 {
+		return output.ErrorInfo{Code: "COMMAND_FAILED", Message: "command failed"}
+	}
+	return infos[0]
+}
+
+func errorInfosFor(err error) []output.ErrorInfo {
 	var contractErr *output.ContractError
 	if errors.As(err, &contractErr) {
-		return contractErr.Info()
+		return contractErr.ErrorInfos()
 	}
-	return output.ErrorInfo{
+	return []output.ErrorInfo{{
 		Code:    "COMMAND_FAILED",
 		Message: err.Error(),
-	}
+	}}
 }
 
 func exitCodeFor(err error) int {

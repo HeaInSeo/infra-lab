@@ -13,6 +13,7 @@ type ContractError struct {
 	Field   string
 	Exit    int
 	Err     error
+	Infos   []ErrorInfo
 }
 
 func NewError(code, message string, exitCode int) *ContractError {
@@ -60,8 +61,19 @@ func (e *ContractError) ExitCode() int {
 }
 
 func (e *ContractError) Info() ErrorInfo {
+	infos := e.ErrorInfos()
+	if len(infos) > 0 {
+		return infos[0]
+	}
+	return ErrorInfo{Code: "COMMAND_FAILED", Message: "command failed"}
+}
+
+func (e *ContractError) ErrorInfos() []ErrorInfo {
 	if e == nil {
-		return ErrorInfo{Code: "COMMAND_FAILED", Message: "command failed"}
+		return []ErrorInfo{{Code: "COMMAND_FAILED", Message: "command failed"}}
+	}
+	if len(e.Infos) > 0 {
+		return e.Infos
 	}
 	message := e.Message
 	if message == "" && e.Err != nil {
@@ -70,9 +82,9 @@ func (e *ContractError) Info() ErrorInfo {
 	if message == "" {
 		message = e.Code
 	}
-	return ErrorInfo{
+	return []ErrorInfo{{
 		Code:    e.Code,
 		Message: message,
 		Field:   e.Field,
-	}
+	}}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/HeaInSeo/infra-lab/ilab/internal/lab"
+	"github.com/HeaInSeo/infra-lab/ilab/internal/output"
 )
 
 var doctorCmd = &cobra.Command{
@@ -46,9 +47,16 @@ var prereqs = []prereq{
 func runDoctor(_ *cobra.Command, _ []string) error {
 	root, err := lab.FindRoot()
 	if err != nil {
+		if wantsJSON() {
+			return output.WrapError("ROOT_NOT_FOUND", err.Error(), output.ExitDomain, err)
+		}
 		fmt.Fprintf(os.Stderr, "✗ infra-lab root: %v\n", err)
 		fmt.Fprintln(os.Stderr, "  set INFRA_LAB_ROOT or run from inside the repository")
 		return err
+	}
+	if wantsJSON() {
+		data := doctorPayload(root)
+		return output.WriteJSON(os.Stdout, output.Success("doctor", data))
 	}
 	fmt.Printf("✓ infra-lab root: %s\n\n", root)
 
@@ -149,4 +157,86 @@ func runDoctor(_ *cobra.Command, _ []string) error {
 	}
 
 	return nil
+}
+
+func doctorPayload(root string) doctorData {
+	var prereqData []doctorPrereqData
+	missingRequired := 0
+	for _, p := range prereqs {
+		path, err := exec.LookPath(p.cmd)
+		found := err == nil
+		if p.required && !found {
+			missingRequired++
+		}
+		prereqData = append(prereqData, doctorPrereqData{
+			Name:     p.name,
+			Command:  p.cmd,
+			Scope:    p.scope,
+			Required: p.required,
+			Found:    found,
+			Path:     path,
+		})
+	}
+
+	findings := []doctorFindingData{}
+	envs, err := lab.ListEnvs(root)
+	if err != nil {
+		findings = append(findings, doctorFindingData{
+			Code:    "ENV_LIST_FAILED",
+			Message: err.Error(),
+		})
+	}
+
+	legacy := lab.DetectLegacyFiles(root)
+	if legacy == nil {
+		legacy = []string{}
+	}
+	if len(legacy) > 0 {
+		findings = append(findings, doctorFindingData{
+			Code:    "LEGACY_FILES_FOUND",
+			Message: "pre-Phase-2 files were found and will not be modified automatically",
+		})
+	}
+
+	vmData := []doctorVMData{}
+	vms, err := lab.ListAllVMs(root)
+	if err != nil {
+		findings = append(findings, doctorFindingData{
+			Code:    "VM_LIST_FAILED",
+			Message: err.Error(),
+		})
+	}
+	for _, vm := range vms {
+		vmData = append(vmData, doctorVMData{
+			Name:    vm.Name,
+			Managed: vm.Managed,
+			Env:     vm.EnvName,
+			State:   vm.State,
+			IPv4:    vm.IPv4,
+		})
+	}
+
+	risk := "LOW"
+	summary := "Required tools are installed"
+	if missingRequired > 0 {
+		risk = "HIGH"
+		summary = "Required tools are missing"
+		findings = append(findings, doctorFindingData{
+			Code:    "REQUIRED_TOOLS_MISSING",
+			Message: fmt.Sprintf("%d required tool(s) missing", missingRequired),
+		})
+	} else if len(legacy) > 0 || len(findings) > 0 {
+		risk = "MEDIUM"
+		summary = "Doctor found non-blocking findings"
+	}
+
+	return doctorData{
+		Root:          root,
+		Prerequisites: prereqData,
+		Envs:          envListPayload(envs).Envs,
+		LegacyFiles:   legacy,
+		VMs:           vmData,
+		Health:        doctorHealthData{Risk: risk, Summary: summary},
+		Findings:      findings,
+	}
 }

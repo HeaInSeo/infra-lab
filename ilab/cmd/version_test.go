@@ -15,7 +15,16 @@ func TestCurrentCapabilitiesData(t *testing.T) {
 		t.Fatalf("contractVersion = %q, want %q", data.ContractVersion, output.ContractVersion)
 	}
 
-	want := []string{"version.v1", "capabilities.v1"}
+	want := []string{
+		"version.v1",
+		"capabilities.v1",
+		"doctor.v1",
+		"env.list.v1",
+		"env.status.v1",
+		"profile.list.v1",
+		"profile.show.v1",
+		"profile.validate.v1",
+	}
 	if !reflect.DeepEqual(data.Capabilities, want) {
 		t.Fatalf("capabilities = %#v, want %#v", data.Capabilities, want)
 	}
