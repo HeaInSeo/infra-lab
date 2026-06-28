@@ -100,6 +100,9 @@ func currentCapabilitiesData() capabilitiesData {
 			"profile.list.v1",
 			"profile.show.v1",
 			"profile.validate.v1",
+			"k8s.status.v1",
+			"vm.list.v1",
+			"vm.version.v1",
 		},
 	}
 }

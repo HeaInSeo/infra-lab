@@ -114,6 +114,55 @@ type doctorFindingData struct {
 	Message string `json:"message"`
 }
 
+type k8sStatusData struct {
+	Env        string              `json:"env,omitempty"`
+	Kubeconfig string              `json:"kubeconfig"`
+	Cluster    k8sClusterData      `json:"cluster"`
+	Nodes      []k8sNodeData       `json:"nodes"`
+	Pods       []k8sPodData        `json:"pods"`
+	Health     doctorHealthData    `json:"health"`
+	Findings   []doctorFindingData `json:"findings"`
+}
+
+type k8sClusterData struct {
+	Reachable    bool     `json:"reachable"`
+	NodesReady   int      `json:"nodesReady"`
+	PodsNotReady []string `json:"podsNotReady"`
+}
+
+type k8sNodeData struct {
+	Name              string   `json:"name"`
+	Ready             bool     `json:"ready"`
+	Roles             []string `json:"roles"`
+	KubernetesVersion string   `json:"kubernetesVersion,omitempty"`
+}
+
+type k8sPodData struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Phase     string `json:"phase"`
+	Ready     bool   `json:"ready"`
+	NodeName  string `json:"nodeName,omitempty"`
+}
+
+type vmListData struct {
+	VMs []vmData `json:"vms"`
+}
+
+type vmData struct {
+	Name    string `json:"name"`
+	Managed bool   `json:"managed"`
+	Env     string `json:"env,omitempty"`
+	Backend string `json:"backend,omitempty"`
+	State   string `json:"state"`
+	IPv4    string `json:"ipv4,omitempty"`
+}
+
+type vmVersionData struct {
+	VM    string         `json:"vm"`
+	Build *lab.BuildInfo `json:"build"`
+}
+
 func envListPayload(envs []*lab.Env) envListData {
 	items := make([]envListItemData, 0, len(envs))
 	for _, env := range envs {

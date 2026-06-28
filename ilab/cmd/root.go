@@ -22,6 +22,9 @@ var jsonCapableCommands = map[string]bool{
 	"profile.list":     true,
 	"profile.show":     true,
 	"profile.validate": true,
+	"k8s.status":       true,
+	"vm.list":          true,
+	"vm.version":       true,
 }
 
 var rootCmd = &cobra.Command{
