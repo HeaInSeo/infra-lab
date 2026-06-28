@@ -3,6 +3,7 @@ SHELL       := /usr/bin/env bash
 .DEFAULT_GOAL := check
 
 ILAB_BIN := bin/ilab
+MCP_BIN  := bin/infra-lab-mcp
 
 .PHONY: build
 build:
@@ -10,6 +11,13 @@ build:
 	@mkdir -p bin
 	@cd ilab && go build -o ../$(ILAB_BIN) .
 	@echo "[OK] $(ILAB_BIN)"
+
+.PHONY: build-mcp
+build-mcp:
+	@echo "==> build infra-lab MCP server"
+	@mkdir -p bin
+	@cd mcp && go build -o ../$(MCP_BIN) ./cmd/infra-lab-mcp
+	@echo "[OK] $(MCP_BIN)"
 
 .PHONY: install
 install:
@@ -124,4 +132,5 @@ help:
 	@echo ""
 	@echo "CLI targets:"
 	@echo "  build       Build ilab CLI binary to bin/ilab"
+	@echo "  build-mcp   Build MCP stdio server to bin/infra-lab-mcp"
 	@echo "  install     Install ilab CLI to GOPATH/bin"
