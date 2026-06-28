@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var jsonOutput bool
+
 var rootCmd = &cobra.Command{
 	Use:   "ilab",
 	Short: "infra-lab operator CLI",
@@ -27,9 +29,17 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "print machine-readable JSON")
+
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(capabilitiesCmd)
 	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(vmCmd)
 	rootCmd.AddCommand(k8sCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(profileCmd)
+}
+
+func wantsJSON() bool {
+	return jsonOutput
 }
