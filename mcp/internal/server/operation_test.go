@@ -72,11 +72,13 @@ func TestApprovalTokenRoundTrip(t *testing.T) {
 	}
 }
 
-func TestOperationToolsRegisteredWithEnvStatusCapability(t *testing.T) {
-	handlers := readOnlyTools(map[string]bool{"env.status.v1": true})
+func TestOperationToolsRegisteredWithRequiredCapabilities(t *testing.T) {
+	handlers := readOnlyTools(map[string]bool{"env.status.v1": true, "profile.validate.v1": true})
 	for _, name := range []string{
 		"infra_lab.addon_install_prepare",
 		"infra_lab.addon_install_commit",
+		"infra_lab.env_up_prepare",
+		"infra_lab.env_up_commit",
 		"infra_lab.operation_status",
 		"infra_lab.operation_logs",
 	} {

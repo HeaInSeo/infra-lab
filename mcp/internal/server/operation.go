@@ -45,6 +45,8 @@ type operationRecord struct {
 type operationTarget struct {
 	Env               string `json:"env"`
 	Addon             string `json:"addon,omitempty"`
+	Profile           string `json:"profile,omitempty"`
+	ProfileDigest     string `json:"profileDigest,omitempty"`
 	TargetFingerprint string `json:"targetFingerprint"`
 }
 
@@ -81,6 +83,19 @@ type operationLogsData struct {
 	Stderr      string `json:"stderr"`
 }
 
+type profileValidationEnvelope struct {
+	OK   bool `json:"ok"`
+	Data struct {
+		Profile struct {
+			Name string `json:"name"`
+			Path string `json:"path"`
+		} `json:"profile"`
+		Normalized struct {
+			StateDir string `json:"stateDir"`
+		} `json:"normalized"`
+	} `json:"data"`
+}
+
 func handleOperation(args []string, timeout time.Duration) (string, error) {
 	action := ""
 	if len(args) > 0 {
@@ -92,6 +107,10 @@ func handleOperation(args []string, timeout time.Duration) (string, error) {
 		return prepareAddonInstall(fields)
 	case "addon_install_commit":
 		return commitAddonInstall(fields, timeout)
+	case "env_up_prepare":
+		return prepareEnvUp(fields)
+	case "env_up_commit":
+		return commitEnvUp(fields, timeout)
 	case "status":
 		return operationStatus(fields["operationId"])
 	case "logs":
@@ -99,6 +118,162 @@ func handleOperation(args []string, timeout time.Duration) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported operation action: %s", action)
 	}
+}
+
+func prepareEnvUp(fields map[string]string) (string, error) {
+	profile := fields["profile"]
+	if profile == "" {
+		return "", fmt.Errorf("profile is required")
+	}
+	validation, isErr, err := runILab([]string{"profile", "validate", profile}, 30*time.Second)
+	if err != nil {
+		return "", err
+	}
+	if isErr {
+		return "", fmt.Errorf("PROFILE_INVALID: %s", strings.TrimSpace(validation))
+	}
+	var parsed profileValidationEnvelope
+	if err := json.Unmarshal([]byte(validation), &parsed); err != nil {
+		return "", err
+	}
+	env := fields["env"]
+	if env == "" {
+		env = filepath.Base(parsed.Data.Normalized.StateDir)
+	}
+	if env == "" || env == "." {
+		env = parsed.Data.Profile.Name
+	}
+	if err := validateTokenPart(env); err != nil {
+		return "", err
+	}
+	root, err := infraLabRoot()
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(filepath.Join(root, "state", env)); err == nil {
+		return "", fmt.Errorf("ENV_ALREADY_EXISTS: %s", env)
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	profileDigest := digest("profile", profile, validation)
+	now := time.Now().UTC()
+	op := operationRecord{
+		OperationID: operationID("env_up"),
+		Tool:        "env_up",
+		Status:      "PREPARED",
+		Risk:        "HIGH",
+		Destructive: false,
+		Target: operationTarget{
+			Env:               env,
+			Profile:           profile,
+			ProfileDigest:     profileDigest,
+			TargetFingerprint: digest("env_up", env, profile, profileDigest),
+		},
+		CreatedAt: now.Format(time.RFC3339),
+		ExpiresAt: now.Add(1 * time.Hour).Format(time.RFC3339),
+		Approval: operationApproval{
+			Required: true,
+			Status:   "required",
+			Mode:     "token-v1",
+		},
+		Steps: []operationStep{
+			{Name: "validate profile", Status: "succeeded"},
+			{Name: "collect pre-snapshot", Status: "pending"},
+			{Name: "run env up", Status: "pending"},
+			{Name: "collect post-snapshot", Status: "pending"},
+		},
+	}
+	token, err := approvalToken(op)
+	if err != nil {
+		return "", err
+	}
+	op.Approval.TokenHint = token[:min(18, len(token))]
+	path, err := writeOperation(op)
+	if err != nil {
+		return "", err
+	}
+	data := operationPrepareData{
+		OperationID:       op.OperationID,
+		ApprovalToken:     token,
+		ExpiresAt:         op.ExpiresAt,
+		PlanFingerprint:   digest("plan", "env_up", env, profile, profileDigest),
+		TargetFingerprint: op.Target.TargetFingerprint,
+		Approval:          op.Approval,
+		Risk:              op.Risk,
+		Target:            op.Target,
+		Steps:             []string{"validate profile", "collect pre-snapshot", "run env up", "collect post-snapshot"},
+		Operation:         op,
+		OperationPath:     path,
+	}
+	return encodeOperationEnvelope("env.up.prepare", data)
+}
+
+func commitEnvUp(fields map[string]string, timeout time.Duration) (string, error) {
+	op, err := verifyPreparedOperation(fields, "env_up")
+	if err != nil {
+		return "", err
+	}
+	root, err := infraLabRoot()
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(filepath.Join(root, "state", op.Target.Env)); err == nil {
+		return "", fmt.Errorf("ENV_ALREADY_EXISTS: %s", op.Target.Env)
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	release, err := acquireEnvLock(op)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	if _, err := appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        "env_up_commit",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      map[string]string{"env": op.Target.Env, "profile": op.Target.Profile},
+		Result:      "started",
+	}); err != nil {
+		return "", fmt.Errorf("AUDIT_WRITE_FAILED: %w", err)
+	}
+
+	op.Status = "RUNNING"
+	op.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	op.Approval.Status = "approved"
+	markStep(&op, "collect pre-snapshot", "running")
+	_, _ = writeOperation(op)
+	if err := saveOperationSnapshot(op.OperationID, "pre-snapshot.json", op.Target.Env); err != nil {
+		return failOperation(op, "SNAPSHOT_FAILED", err, "collect pre-snapshot")
+	}
+	markStep(&op, "collect pre-snapshot", "succeeded")
+	markStep(&op, "run env up", "running")
+	_, _ = writeOperation(op)
+	if err := runEnvUpCommand(op, timeout); err != nil {
+		return failOperation(op, "COMMAND_FAILED", err, "run env up")
+	}
+	markStep(&op, "run env up", "succeeded")
+	markStep(&op, "collect post-snapshot", "running")
+	_, _ = writeOperation(op)
+	if err := saveOperationSnapshot(op.OperationID, "post-snapshot.json", op.Target.Env); err != nil {
+		return failOperation(op, "SNAPSHOT_FAILED", err, "collect post-snapshot")
+	}
+	op.Status = "SUCCEEDED"
+	op.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	markStep(&op, "collect post-snapshot", "succeeded")
+	_, _ = writeOperation(op)
+	_, _ = appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        "env_up_commit",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      map[string]string{"env": op.Target.Env, "profile": op.Target.Profile},
+		Result:      "ok",
+	})
+	return encodeOperationEnvelope("env.up.commit", op)
 }
 
 func prepareAddonInstall(fields map[string]string) (string, error) {
@@ -166,33 +341,9 @@ func prepareAddonInstall(fields map[string]string) (string, error) {
 }
 
 func commitAddonInstall(fields map[string]string, timeout time.Duration) (string, error) {
-	operationID := fields["operationId"]
-	token := fields["approvalToken"]
-	op, err := readOperation(operationID)
+	op, err := verifyPreparedOperation(fields, "addon_install")
 	if err != nil {
 		return "", err
-	}
-	if op.Tool != "addon_install" {
-		return "", fmt.Errorf("operation tool mismatch: %s", op.Tool)
-	}
-	if op.Status != "PREPARED" {
-		return "", fmt.Errorf("operation status must be PREPARED, got %s", op.Status)
-	}
-	expiresAt, err := time.Parse(time.RFC3339, op.ExpiresAt)
-	if err != nil {
-		return "", err
-	}
-	if time.Now().UTC().After(expiresAt) {
-		op.Status = "EXPIRED"
-		_, _ = writeOperation(op)
-		return "", fmt.Errorf("APPROVAL_TOKEN_EXPIRED: operation expired")
-	}
-	expected, err := approvalToken(op)
-	if err != nil {
-		return "", err
-	}
-	if !hmac.Equal([]byte(expected), []byte(token)) {
-		return "", fmt.Errorf("APPROVAL_TOKEN_INVALID")
 	}
 
 	release, err := acquireEnvLock(op)
@@ -276,6 +427,48 @@ func commitAddonInstall(fields map[string]string, timeout time.Duration) (string
 	return encodeOperationEnvelope("addon.install.commit", op)
 }
 
+func verifyPreparedOperation(fields map[string]string, tool string) (operationRecord, error) {
+	operationID := fields["operationId"]
+	token := fields["approvalToken"]
+	op, err := readOperation(operationID)
+	if err != nil {
+		return op, err
+	}
+	if op.Tool != tool {
+		return op, fmt.Errorf("operation tool mismatch: %s", op.Tool)
+	}
+	if op.Status != "PREPARED" {
+		return op, fmt.Errorf("operation status must be PREPARED, got %s", op.Status)
+	}
+	expiresAt, err := time.Parse(time.RFC3339, op.ExpiresAt)
+	if err != nil {
+		return op, err
+	}
+	if time.Now().UTC().After(expiresAt) {
+		op.Status = "EXPIRED"
+		_, _ = writeOperation(op)
+		return op, fmt.Errorf("APPROVAL_TOKEN_EXPIRED: operation expired")
+	}
+	expected, err := approvalToken(op)
+	if err != nil {
+		return op, err
+	}
+	if !hmac.Equal([]byte(expected), []byte(token)) {
+		return op, fmt.Errorf("APPROVAL_TOKEN_INVALID")
+	}
+	return op, nil
+}
+
+func failOperation(op operationRecord, code string, err error, step string) (string, error) {
+	op.Status = "FAILED"
+	op.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	op.ErrorCode = code
+	op.Error = err.Error()
+	markStep(&op, step, "failed")
+	_, _ = writeOperation(op)
+	return "", err
+}
+
 func saveOperationSnapshot(operationID, name, env string) error {
 	dir, err := operationDir(operationID)
 	if err != nil {
@@ -286,6 +479,43 @@ func saveOperationSnapshot(operationID, name, env string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, name), []byte(raw), 0644)
+}
+
+func runEnvUpCommand(op operationRecord, timeout time.Duration) error {
+	root, err := infraLabRoot()
+	if err != nil {
+		return err
+	}
+	dir, err := operationDir(op.OperationID)
+	if err != nil {
+		return err
+	}
+	stdoutPath := filepath.Join(dir, "stdout.log")
+	stderrPath := filepath.Join(dir, "stderr.log")
+	stdout, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer stdout.Close()
+	stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer stderr.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, filepath.Join(root, "bin", "ilab"), "env", "up", op.Target.Profile)
+	cmd.Env = append(os.Environ(), "INFRA_LAB_ROOT="+root)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("COMMAND_TIMEOUT: env up timed out after %s", timeout)
+		}
+		return err
+	}
+	return nil
 }
 
 func runAddonCommand(op operationRecord, timeout time.Duration) error {
@@ -432,7 +662,7 @@ func acquireEnvLock(op operationRecord) (func(), error) {
 	lock := map[string]any{
 		"operationId": op.OperationID,
 		"env":         op.Target.Env,
-		"tool":        "addon_install_commit",
+		"tool":        op.Tool + "_commit",
 		"startedAt":   time.Now().UTC().Format(time.RFC3339),
 		"expiresAt":   time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339),
 		"pid":         os.Getpid(),
@@ -468,7 +698,7 @@ func approvalToken(op operationRecord) (string, error) {
 		return "", err
 	}
 	mac := hmac.New(sha256.New, secret)
-	for _, part := range []string{op.OperationID, op.Tool, op.Target.Env, op.Target.Addon, op.Target.TargetFingerprint, op.Risk, op.ExpiresAt} {
+	for _, part := range []string{op.OperationID, op.Tool, op.Target.Env, op.Target.Addon, op.Target.Profile, op.Target.ProfileDigest, op.Target.TargetFingerprint, op.Risk, op.ExpiresAt} {
 		_, _ = mac.Write([]byte(part))
 		_, _ = mac.Write([]byte{0})
 	}
