@@ -33,27 +33,15 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 		if !capabilities[capability] {
 			return
 		}
-		handlers[name] = toolHandler{
-			tool: tool{
-				Name:        name,
-				Description: description,
-				InputSchema: schema,
-			},
-			call: func(raw json.RawMessage) (toolResult, error) {
-				args, err := ilabArgs(raw)
-				if err != nil {
-					return toolResult{}, err
-				}
-				out, isErr, err := runILab(args, timeout)
-				if err != nil {
-					return toolResult{}, err
-				}
-				return toolResult{
-					Content: []toolContent{{Type: "text", Text: out}},
-					IsError: isErr,
-				}, nil
-			},
+		addTool(handlers, name, description, schema, ilabArgs, timeout)
+	}
+	addSynthetic := func(required []string, name, description string, schema map[string]any, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
+		for _, capability := range required {
+			if !capabilities[capability] {
+				return
+			}
 		}
+		addTool(handlers, name, description, schema, ilabArgs, timeout)
 	}
 
 	add("version.v1", "infra_lab.version", "Show infra-lab version metadata.", emptySchema(), noArgs("version"), 30*time.Second)
@@ -68,8 +56,61 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	add("profile.list.v1", "infra_lab.profile_list", "List available profiles.", emptySchema(), noArgs("profile", "list"), 30*time.Second)
 	add("profile.show.v1", "infra_lab.profile_show", "Show normalized profile data.", profileSchema(), profileArgs("profile", "show"), 30*time.Second)
 	add("profile.validate.v1", "infra_lab.profile_validate", "Validate a profile.", profileSchema(), profileArgs("profile", "validate"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1", "vm.list.v1", "k8s.status.v1"}, "infra_lab.collect_snapshot", "Collect a read-only infra-lab health snapshot.", envSchema(), snapshotArgs(), 90*time.Second)
+	addSynthetic([]string{"env.status.v1", "vm.list.v1", "k8s.status.v1"}, "infra_lab.summarize_health", "Summarize read-only infra-lab snapshot health.", envSchema(), snapshotArgs(), 90*time.Second)
 
 	return handlers
+}
+
+func addTool(handlers map[string]toolHandler, name, description string, schema map[string]any, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
+	handlers[name] = toolHandler{
+		tool: tool{
+			Name:        name,
+			Description: description,
+			InputSchema: schema,
+		},
+		call: func(raw json.RawMessage) (toolResult, error) {
+			args, err := ilabArgs(raw)
+			if err != nil {
+				return toolResult{}, err
+			}
+			if len(args) > 0 && args[0] == "__snapshot__" {
+				env := ""
+				if len(args) > 1 {
+					env = args[1]
+				}
+				out, err := collectSnapshot(env, timeout)
+				if err != nil {
+					return toolResult{}, err
+				}
+				return toolResult{Content: []toolContent{{Type: "text", Text: out}}}, nil
+			}
+			out, isErr, err := runILab(args, timeout)
+			if err != nil {
+				return toolResult{}, err
+			}
+			return toolResult{
+				Content: []toolContent{{Type: "text", Text: out}},
+				IsError: isErr,
+			}, nil
+		},
+	}
+}
+
+func snapshotArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed envArg
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				return nil, err
+			}
+		}
+		// Marker consumed by toolHandler before invoking ilab directly.
+		if parsed.Env != "" {
+			return []string{"__snapshot__", parsed.Env}, nil
+		}
+		return []string{"__snapshot__"}, nil
+	}
 }
 
 func runILab(args []string, timeout time.Duration) (string, bool, error) {
