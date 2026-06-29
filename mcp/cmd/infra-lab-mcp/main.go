@@ -17,7 +17,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := server.New().Serve(os.Stdin, os.Stdout); err != nil {
+	srv, err := server.New()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "infra-lab-mcp: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := srv.Serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "infra-lab-mcp: %v\n", err)
 		os.Exit(1)
 	}

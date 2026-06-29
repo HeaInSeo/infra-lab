@@ -9,11 +9,21 @@ import (
 )
 
 type Server struct {
-	tools map[string]toolHandler
+	tools      map[string]toolHandler
+	bootstrap  bootstrapInfo
+	serverName string
 }
 
-func New() *Server {
-	return &Server{tools: readOnlyTools()}
+func New() (*Server, error) {
+	info, err := bootstrap()
+	if err != nil {
+		return nil, err
+	}
+	return &Server{
+		tools:      readOnlyTools(info.Capabilities),
+		bootstrap:  info,
+		serverName: "infra-lab-mcp",
+	}, nil
 }
 
 func (s *Server) Serve(r io.Reader, w io.Writer) error {
@@ -46,8 +56,8 @@ func (s *Server) handle(req request) (response, bool) {
 		return okResponse(req.ID, map[string]any{
 			"protocolVersion": "2024-11-05",
 			"serverInfo": map[string]any{
-				"name":    "infra-lab-mcp",
-				"version": "dev",
+				"name":    s.serverName,
+				"version": s.bootstrap.InfraLabVersion,
 			},
 			"capabilities": map[string]any{
 				"tools": map[string]any{"listChanged": false},
