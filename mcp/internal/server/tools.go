@@ -54,6 +54,12 @@ type envUpPrepareArg struct {
 	Env     string `json:"env,omitempty"`
 }
 
+type destructivePrepareArg struct {
+	Env     string `json:"env,omitempty"`
+	Profile string `json:"profile,omitempty"`
+	Addon   string `json:"addon,omitempty"`
+}
+
 type addonCommitArg struct {
 	OperationID   string `json:"operationId"`
 	ApprovalToken string `json:"approvalToken"`
@@ -108,6 +114,14 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_logs", "Read stdout/stderr logs for an infra-lab operation.", operationSchema(), operationArgs("logs"), 30*time.Second)
 	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_prepare", "Prepare an approved new environment creation operation.", envUpPrepareSchema(), envUpPrepareArgs(), 30*time.Second)
 	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_commit", "Commit a prepared new environment creation operation after approval.", addonCommitSchema(), envUpCommitArgs(), 30*time.Minute)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_down_prepare", "Prepare an approved destructive env down operation.", destructivePrepareSchema(false, false), destructivePrepareArgs("env_down_prepare"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_down_commit", "Commit a prepared env down operation after approval.", addonCommitSchema(), destructiveCommitArgs("env_down_commit"), 30*time.Minute)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_clean_prepare", "Prepare an approved destructive env clean operation.", destructivePrepareSchema(false, false), destructivePrepareArgs("env_clean_prepare"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_clean_commit", "Commit a prepared env clean operation after approval.", addonCommitSchema(), destructiveCommitArgs("env_clean_commit"), 10*time.Minute)
+	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_rebuild_prepare", "Prepare an approved destructive env rebuild operation.", destructivePrepareSchema(true, false), destructivePrepareArgs("env_rebuild_prepare"), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_rebuild_commit", "Commit a prepared env rebuild operation after approval.", addonCommitSchema(), destructiveCommitArgs("env_rebuild_commit"), 45*time.Minute)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_uninstall_prepare", "Prepare an approved destructive addon uninstall operation.", destructivePrepareSchema(false, true), destructivePrepareArgs("addon_uninstall_prepare"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_uninstall_commit", "Commit a prepared addon uninstall operation after approval.", addonCommitSchema(), destructiveCommitArgs("addon_uninstall_commit"), 15*time.Minute)
 
 	return handlers
 }
@@ -235,6 +249,42 @@ func envUpCommitArgs() func(json.RawMessage) ([]string, error) {
 			return nil, fmt.Errorf("approvalToken is required")
 		}
 		return []string{"__operation__", "env_up_commit", "operationId=" + parsed.OperationID, "approvalToken=" + parsed.ApprovalToken}, nil
+	}
+}
+
+func destructivePrepareArgs(action string) func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed destructivePrepareArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.Env == "" {
+			return nil, fmt.Errorf("env is required")
+		}
+		out := []string{"__operation__", action, "env=" + parsed.Env}
+		if parsed.Profile != "" {
+			out = append(out, "profile="+parsed.Profile)
+		}
+		if parsed.Addon != "" {
+			out = append(out, "addon="+parsed.Addon)
+		}
+		return out, nil
+	}
+}
+
+func destructiveCommitArgs(action string) func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed addonCommitArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.OperationID == "" {
+			return nil, fmt.Errorf("operationId is required")
+		}
+		if parsed.ApprovalToken == "" {
+			return nil, fmt.Errorf("approvalToken is required")
+		}
+		return []string{"__operation__", action, "operationId=" + parsed.OperationID, "approvalToken=" + parsed.ApprovalToken}, nil
 	}
 }
 
@@ -571,6 +621,27 @@ func envUpPrepareSchema() map[string]any {
 			"env":     map[string]any{"type": "string"},
 		},
 		"required":             []string{"profile"},
+		"additionalProperties": false,
+	}
+}
+
+func destructivePrepareSchema(profile, addon bool) map[string]any {
+	properties := map[string]any{
+		"env": map[string]any{"type": "string"},
+	}
+	required := []string{"env"}
+	if profile {
+		properties["profile"] = map[string]any{"type": "string"}
+		required = append(required, "profile")
+	}
+	if addon {
+		properties["addon"] = map[string]any{"type": "string"}
+		required = append(required, "addon")
+	}
+	return map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"required":             required,
 		"additionalProperties": false,
 	}
 }
