@@ -33,6 +33,17 @@ type planArg struct {
 	Addon   string `json:"addon,omitempty"`
 }
 
+type profileWriteArg struct {
+	Name     string `json:"name"`
+	Source   string `json:"source,omitempty"`
+	Backend  string `json:"backend,omitempty"`
+	CNI      string `json:"cni,omitempty"`
+	Masters  int    `json:"masters,omitempty"`
+	Workers  int    `json:"workers,omitempty"`
+	OSImage  string `json:"osImage,omitempty"`
+	StateDir string `json:"stateDir,omitempty"`
+}
+
 func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	handlers := map[string]toolHandler{}
 	add := func(capability, name, description string, schema map[string]any, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
@@ -69,6 +80,9 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.rebuild_plan", "Create a plan-only env rebuild proposal.", planSchema(false), planArgs("rebuild"), 30*time.Second)
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_plan", "Create a plan-only addon install proposal.", planSchema(true), planArgs("addon_install"), 30*time.Second)
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_uninstall_plan", "Create a plan-only addon uninstall proposal.", planSchema(true), planArgs("addon_uninstall"), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_clone", "Clone a profile into the user profile directory without overwriting existing files.", profileWriteSchema(true), profileWriteArgs("clone"), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_save_as", "Create a new profile in the user profile directory without touching infrastructure.", profileWriteSchema(false), profileWriteArgs("save_as"), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_validate_and_save", "Validate and save a new profile in the user profile directory.", profileWriteSchema(false), profileWriteArgs("validate_and_save"), 30*time.Second)
 
 	return handlers
 }
@@ -108,6 +122,13 @@ func addTool(handlers map[string]toolHandler, name, description string, schema m
 				}
 				return toolResult{Content: []toolContent{{Type: "text", Text: out}}}, nil
 			}
+			if len(args) > 0 && args[0] == "__profile_write__" {
+				out, err := writeProfile(args[1:], timeout)
+				if err != nil {
+					return toolResult{}, err
+				}
+				return toolResult{Content: []toolContent{{Type: "text", Text: out}}}, nil
+			}
 			out, isErr, err := runILab(args, timeout)
 			if err != nil {
 				return toolResult{}, err
@@ -117,6 +138,44 @@ func addTool(handlers map[string]toolHandler, name, description string, schema m
 				IsError: isErr,
 			}, nil
 		},
+	}
+}
+
+func profileWriteArgs(action string) func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed profileWriteArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.Name == "" {
+			return nil, fmt.Errorf("name is required")
+		}
+		if action == "clone" && parsed.Source == "" {
+			return nil, fmt.Errorf("source is required")
+		}
+		out := []string{"__profile_write__", action, "name=" + parsed.Name}
+		if parsed.Source != "" {
+			out = append(out, "source="+parsed.Source)
+		}
+		if parsed.Backend != "" {
+			out = append(out, "backend="+parsed.Backend)
+		}
+		if parsed.CNI != "" {
+			out = append(out, "cni="+parsed.CNI)
+		}
+		if parsed.Masters > 0 {
+			out = append(out, fmt.Sprintf("masters=%d", parsed.Masters))
+		}
+		if parsed.Workers > 0 {
+			out = append(out, fmt.Sprintf("workers=%d", parsed.Workers))
+		}
+		if parsed.OSImage != "" {
+			out = append(out, "osImage="+parsed.OSImage)
+		}
+		if parsed.StateDir != "" {
+			out = append(out, "stateDir="+parsed.StateDir)
+		}
+		return out, nil
 	}
 }
 
@@ -332,6 +391,29 @@ func planSchema(addon bool) map[string]any {
 	return map[string]any{
 		"type":                 "object",
 		"properties":           properties,
+		"additionalProperties": false,
+	}
+}
+
+func profileWriteSchema(clone bool) map[string]any {
+	properties := map[string]any{
+		"name":     map[string]any{"type": "string"},
+		"backend":  map[string]any{"type": "string"},
+		"cni":      map[string]any{"type": "string"},
+		"masters":  map[string]any{"type": "integer", "minimum": 1},
+		"workers":  map[string]any{"type": "integer", "minimum": 1},
+		"osImage":  map[string]any{"type": "string"},
+		"stateDir": map[string]any{"type": "string"},
+	}
+	required := []string{"name"}
+	if clone {
+		properties["source"] = map[string]any{"type": "string"}
+		required = append(required, "source")
+	}
+	return map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"required":             required,
 		"additionalProperties": false,
 	}
 }
