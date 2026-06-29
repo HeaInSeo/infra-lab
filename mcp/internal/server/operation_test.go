@@ -81,6 +81,14 @@ func TestOperationToolsRegisteredWithRequiredCapabilities(t *testing.T) {
 		"infra_lab.env_up_commit",
 		"infra_lab.operation_status",
 		"infra_lab.operation_logs",
+		"infra_lab.env_down_prepare",
+		"infra_lab.env_down_commit",
+		"infra_lab.env_clean_prepare",
+		"infra_lab.env_clean_commit",
+		"infra_lab.env_rebuild_prepare",
+		"infra_lab.env_rebuild_commit",
+		"infra_lab.addon_uninstall_prepare",
+		"infra_lab.addon_uninstall_commit",
 	} {
 		if _, ok := handlers[name]; !ok {
 			t.Fatalf("expected %s to be registered", name)

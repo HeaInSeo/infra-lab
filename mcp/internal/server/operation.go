@@ -111,6 +111,10 @@ func handleOperation(args []string, timeout time.Duration) (string, error) {
 		return prepareEnvUp(fields)
 	case "env_up_commit":
 		return commitEnvUp(fields, timeout)
+	case "env_down_prepare", "env_clean_prepare", "env_rebuild_prepare", "addon_uninstall_prepare":
+		return prepareDestructive(action, fields)
+	case "env_down_commit", "env_clean_commit", "env_rebuild_commit", "addon_uninstall_commit":
+		return commitDestructive(action, fields, timeout)
 	case "status":
 		return operationStatus(fields["operationId"])
 	case "logs":
@@ -118,6 +122,147 @@ func handleOperation(args []string, timeout time.Duration) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported operation action: %s", action)
 	}
+}
+
+func prepareDestructive(action string, fields map[string]string) (string, error) {
+	env := fields["env"]
+	if env == "" {
+		return "", fmt.Errorf("env is required")
+	}
+	if err := validateTokenPart(env); err != nil {
+		return "", err
+	}
+	tool := strings.TrimSuffix(action, "_prepare")
+	if tool == "env_rebuild" && fields["profile"] == "" {
+		return "", fmt.Errorf("profile is required")
+	}
+	if tool == "addon_uninstall" && fields["addon"] == "" {
+		return "", fmt.Errorf("addon is required")
+	}
+	if fields["profile"] != "" {
+		validation, isErr, err := runILab([]string{"profile", "validate", fields["profile"]}, 30*time.Second)
+		if err != nil {
+			return "", err
+		}
+		if isErr {
+			return "", fmt.Errorf("PROFILE_INVALID: %s", strings.TrimSpace(validation))
+		}
+	}
+
+	profileDigest := ""
+	if fields["profile"] != "" {
+		profileDigest = digest("profile", fields["profile"])
+	}
+	now := time.Now().UTC()
+	op := operationRecord{
+		OperationID: operationID(tool),
+		Tool:        tool,
+		Status:      "PREPARED",
+		Risk:        "HIGH",
+		Destructive: true,
+		Target: operationTarget{
+			Env:               env,
+			Addon:             fields["addon"],
+			Profile:           fields["profile"],
+			ProfileDigest:     profileDigest,
+			TargetFingerprint: digest(tool, env, fields["addon"], fields["profile"]),
+		},
+		CreatedAt: now.Format(time.RFC3339),
+		ExpiresAt: now.Add(1 * time.Hour).Format(time.RFC3339),
+		Approval: operationApproval{
+			Required: true,
+			Status:   "required",
+			Mode:     "token-v1",
+		},
+		Steps: destructiveSteps(tool),
+	}
+	token, err := approvalToken(op)
+	if err != nil {
+		return "", err
+	}
+	op.Approval.TokenHint = token[:min(18, len(token))]
+	path, err := writeOperation(op)
+	if err != nil {
+		return "", err
+	}
+	stepNames := make([]string, 0, len(op.Steps))
+	for _, step := range op.Steps {
+		stepNames = append(stepNames, step.Name)
+	}
+	data := operationPrepareData{
+		OperationID:       op.OperationID,
+		ApprovalToken:     token,
+		ExpiresAt:         op.ExpiresAt,
+		PlanFingerprint:   digest("plan", tool, env, fields["addon"], fields["profile"]),
+		TargetFingerprint: op.Target.TargetFingerprint,
+		Approval:          op.Approval,
+		Risk:              op.Risk,
+		Target:            op.Target,
+		Steps:             stepNames,
+		Operation:         op,
+		OperationPath:     path,
+	}
+	return encodeOperationEnvelope(commandForTool(tool)+".prepare", data)
+}
+
+func commitDestructive(action string, fields map[string]string, timeout time.Duration) (string, error) {
+	tool := strings.TrimSuffix(action, "_commit")
+	op, err := verifyPreparedOperation(fields, tool)
+	if err != nil {
+		return "", err
+	}
+	release, err := acquireEnvLock(op)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	if _, err := appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        tool + "_commit",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      auditTarget(op),
+		Result:      "started",
+	}); err != nil {
+		return "", fmt.Errorf("AUDIT_WRITE_FAILED: %w", err)
+	}
+
+	op.Status = "RUNNING"
+	op.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	op.Approval.Status = "approved"
+	markStep(&op, "collect pre-snapshot", "running")
+	_, _ = writeOperation(op)
+	if err := saveOperationSnapshot(op.OperationID, "pre-snapshot.json", op.Target.Env); err != nil {
+		return failOperation(op, "SNAPSHOT_FAILED", err, "collect pre-snapshot")
+	}
+	markStep(&op, "collect pre-snapshot", "succeeded")
+	runStep := destructiveRunStep(tool)
+	markStep(&op, runStep, "running")
+	_, _ = writeOperation(op)
+	if err := runDestructiveCommand(op, timeout); err != nil {
+		return failOperation(op, "COMMAND_FAILED", err, runStep)
+	}
+	markStep(&op, runStep, "succeeded")
+	markStep(&op, "collect post-snapshot", "running")
+	_, _ = writeOperation(op)
+	if err := saveOperationSnapshot(op.OperationID, "post-snapshot.json", op.Target.Env); err != nil {
+		return failOperation(op, "SNAPSHOT_FAILED", err, "collect post-snapshot")
+	}
+	op.Status = "SUCCEEDED"
+	op.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	markStep(&op, "collect post-snapshot", "succeeded")
+	_, _ = writeOperation(op)
+	_, _ = appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        tool + "_commit",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      auditTarget(op),
+		Result:      "ok",
+	})
+	return encodeOperationEnvelope(commandForTool(tool)+".commit", op)
 }
 
 func prepareEnvUp(fields map[string]string) (string, error) {
@@ -518,7 +663,46 @@ func runEnvUpCommand(op operationRecord, timeout time.Duration) error {
 	return nil
 }
 
+func runDestructiveCommand(op operationRecord, timeout time.Duration) error {
+	root, err := infraLabRoot()
+	if err != nil {
+		return err
+	}
+	switch op.Tool {
+	case "env_down":
+		return runLoggedCommand(op, timeout, filepath.Join(root, "bin", "ilab"), "env", "down", op.Target.Env)
+	case "env_clean":
+		return runLoggedCommandWithEnv(op, timeout, map[string]string{"FORCE": "1"}, "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "clean")
+	case "env_rebuild":
+		return runLoggedCommand(op, timeout, filepath.Join(root, "bin", "ilab"), "env", "rebuild", op.Target.Profile, "--approve")
+	case "addon_uninstall":
+		return runLoggedCommand(op, timeout, "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "addons-uninstall", "optional", op.Target.Addon)
+	default:
+		return fmt.Errorf("unsupported destructive tool: %s", op.Tool)
+	}
+}
+
 func runAddonCommand(op operationRecord, timeout time.Duration) error {
+	root, err := infraLabRoot()
+	if err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"addons-install", "optional", op.Target.Addon},
+		{"addons-verify", "optional", op.Target.Addon},
+	} {
+		if err := runLoggedCommand(op, timeout, "bash", append([]string{filepath.Join(root, "scripts", "k8s-tool.sh")}, args...)...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runLoggedCommand(op operationRecord, timeout time.Duration, command string, args ...string) error {
+	return runLoggedCommandWithEnv(op, timeout, nil, command, args...)
+}
+
+func runLoggedCommandWithEnv(op operationRecord, timeout time.Duration, extraEnv map[string]string, command string, args ...string) error {
 	root, err := infraLabRoot()
 	if err != nil {
 		return err
@@ -542,20 +726,18 @@ func runAddonCommand(op operationRecord, timeout time.Duration) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	for _, args := range [][]string{
-		{"addons-install", "optional", op.Target.Addon},
-		{"addons-verify", "optional", op.Target.Addon},
-	} {
-		cmd := exec.CommandContext(ctx, "bash", append([]string{filepath.Join(root, "scripts", "k8s-tool.sh")}, args...)...)
-		cmd.Env = append(os.Environ(), "INFRA_LAB_ROOT="+root, "ENV_NAME="+op.Target.Env)
-		cmd.Stdout = stdout
-		cmd.Stderr = stderr
-		if err := cmd.Run(); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				return fmt.Errorf("COMMAND_TIMEOUT: addon command timed out after %s", timeout)
-			}
-			return err
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Env = append(os.Environ(), "INFRA_LAB_ROOT="+root, "ENV_NAME="+op.Target.Env)
+	for key, value := range extraEnv {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("COMMAND_TIMEOUT: operation command timed out after %s", timeout)
 		}
+		return err
 	}
 	return nil
 }
@@ -745,6 +927,56 @@ func markStep(op *operationRecord, name, status string) {
 			return
 		}
 	}
+}
+
+func destructiveSteps(tool string) []operationStep {
+	names := []string{"collect pre-snapshot", destructiveRunStep(tool), "collect post-snapshot"}
+	out := make([]operationStep, 0, len(names))
+	for _, name := range names {
+		out = append(out, operationStep{Name: name, Status: "pending"})
+	}
+	return out
+}
+
+func destructiveRunStep(tool string) string {
+	switch tool {
+	case "env_down":
+		return "run env down"
+	case "env_clean":
+		return "run env clean"
+	case "env_rebuild":
+		return "run env rebuild"
+	case "addon_uninstall":
+		return "run addon uninstall"
+	default:
+		return "run destructive command"
+	}
+}
+
+func commandForTool(tool string) string {
+	switch tool {
+	case "env_down":
+		return "env.down"
+	case "env_clean":
+		return "env.clean"
+	case "env_rebuild":
+		return "env.rebuild"
+	case "addon_uninstall":
+		return "addon.uninstall"
+	default:
+		return strings.ReplaceAll(tool, "_", ".")
+	}
+}
+
+func auditTarget(op operationRecord) map[string]string {
+	target := map[string]string{"env": op.Target.Env}
+	if op.Target.Profile != "" {
+		target["profile"] = op.Target.Profile
+	}
+	if op.Target.Addon != "" {
+		target["addon"] = op.Target.Addon
+	}
+	return target
 }
 
 func encodeOperationEnvelope(command string, data any) (string, error) {
