@@ -57,7 +57,7 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	add("profile.show.v1", "infra_lab.profile_show", "Show normalized profile data.", profileSchema(), profileArgs("profile", "show"), 30*time.Second)
 	add("profile.validate.v1", "infra_lab.profile_validate", "Validate a profile.", profileSchema(), profileArgs("profile", "validate"), 30*time.Second)
 	addSynthetic([]string{"env.status.v1", "vm.list.v1", "k8s.status.v1"}, "infra_lab.collect_snapshot", "Collect a read-only infra-lab health snapshot.", envSchema(), snapshotArgs(), 90*time.Second)
-	addSynthetic([]string{"env.status.v1", "vm.list.v1", "k8s.status.v1"}, "infra_lab.summarize_health", "Summarize read-only infra-lab snapshot health.", envSchema(), snapshotArgs(), 90*time.Second)
+	addSynthetic([]string{"env.status.v1", "vm.list.v1", "k8s.status.v1"}, "infra_lab.summarize_health", "Summarize read-only infra-lab snapshot health.", envSchema(), healthSummaryArgs(), 90*time.Second)
 
 	return handlers
 }
@@ -75,11 +75,16 @@ func addTool(handlers map[string]toolHandler, name, description string, schema m
 				return toolResult{}, err
 			}
 			if len(args) > 0 && args[0] == "__snapshot__" {
+				command := "snapshot.collect"
+				if len(args) > 1 && args[1] == "__health__" {
+					command = "health.summarize"
+					args = append(args[:1], args[2:]...)
+				}
 				env := ""
 				if len(args) > 1 {
 					env = args[1]
 				}
-				out, err := collectSnapshot(env, timeout)
+				out, err := collectSnapshot(command, env, timeout)
 				if err != nil {
 					return toolResult{}, err
 				}
@@ -110,6 +115,20 @@ func snapshotArgs() func(json.RawMessage) ([]string, error) {
 			return []string{"__snapshot__", parsed.Env}, nil
 		}
 		return []string{"__snapshot__"}, nil
+	}
+}
+
+func healthSummaryArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		args, err := snapshotArgs()(raw)
+		if err != nil {
+			return nil, err
+		}
+		out := []string{"__snapshot__", "__health__"}
+		if len(args) > 1 {
+			out = append(out, args[1])
+		}
+		return out, nil
 	}
 }
 

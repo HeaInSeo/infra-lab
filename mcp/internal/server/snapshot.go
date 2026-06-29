@@ -50,7 +50,13 @@ type snapshotFinding struct {
 	Message string `json:"message"`
 }
 
-func collectSnapshot(env string, timeout time.Duration) (string, error) {
+type ilabRunner func(args []string, timeout time.Duration) (string, bool, error)
+
+func collectSnapshot(command, env string, timeout time.Duration) (string, error) {
+	return collectSnapshotWithRunner(command, env, timeout, runILab)
+}
+
+func collectSnapshotWithRunner(command, env string, timeout time.Duration, runner ilabRunner) (string, error) {
 	findings := []snapshotFinding{}
 	warnings := []snapshotWarning{}
 	evidence := snapshotEvidence{}
@@ -59,7 +65,7 @@ func collectSnapshot(env string, timeout time.Duration) (string, error) {
 	if env != "" {
 		envArgs = append(envArgs, env)
 	}
-	if raw, isErr, err := runILab(envArgs, timeout); err != nil {
+	if raw, isErr, err := runner(envArgs, timeout); err != nil {
 		findings = append(findings, snapshotFinding{Code: "ENV_STATUS_FAILED", Message: err.Error()})
 	} else {
 		evidence.EnvStatus = json.RawMessage(raw)
@@ -68,7 +74,7 @@ func collectSnapshot(env string, timeout time.Duration) (string, error) {
 		}
 	}
 
-	if raw, isErr, err := runILab([]string{"vm", "list"}, timeout); err != nil {
+	if raw, isErr, err := runner([]string{"vm", "list"}, timeout); err != nil {
 		findings = append(findings, snapshotFinding{Code: "VM_LIST_FAILED", Message: err.Error()})
 	} else {
 		evidence.VMs = json.RawMessage(raw)
@@ -81,7 +87,7 @@ func collectSnapshot(env string, timeout time.Duration) (string, error) {
 	if env != "" {
 		k8sArgs = append(k8sArgs, env)
 	}
-	if raw, isErr, err := runILab(k8sArgs, timeout); err != nil {
+	if raw, isErr, err := runner(k8sArgs, timeout); err != nil {
 		findings = append(findings, snapshotFinding{Code: "K8S_STATUS_FAILED", Message: err.Error()})
 	} else {
 		evidence.K8s = json.RawMessage(raw)
@@ -104,7 +110,7 @@ func collectSnapshot(env string, timeout time.Duration) (string, error) {
 
 	envOut := snapshotEnvelope{
 		OK:              true,
-		Command:         "snapshot.collect",
+		Command:         command,
 		ContractVersion: supportedContractVersion,
 		Data: snapshotData{
 			Env:      env,

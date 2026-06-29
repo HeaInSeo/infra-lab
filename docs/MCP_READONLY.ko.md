@@ -74,6 +74,8 @@ infra_lab.vm_version
 infra_lab.profile_list
 infra_lab.profile_show
 infra_lab.profile_validate
+infra_lab.collect_snapshot
+infra_lab.summarize_health
 ```
 
 금지:
