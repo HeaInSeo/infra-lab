@@ -19,6 +19,13 @@ build-mcp:
 	@cd mcp && go build -o ../$(MCP_BIN) ./cmd/infra-lab-mcp
 	@echo "[OK] $(MCP_BIN)"
 
+.PHONY: test-mcp
+test-mcp:
+	@echo "==> test infra-lab MCP server"
+	@cd mcp && go test ./...
+	@$(MAKE) build-mcp
+	@echo "[OK] test-mcp"
+
 .PHONY: install
 install:
 	@echo "==> install ilab to GOPATH/bin"
@@ -123,6 +130,7 @@ help:
 	@echo "  lint-go     gofmt + go vet + go build"
 	@echo "  test-go     go test ./..."
 	@echo "  test-contract  Validate ilab JSON contract tests"
+	@echo "  test-mcp    Test and build MCP stdio server"
 	@echo ""
 	@echo "Environment targets:"
 	@echo "  env-up      Create cluster    (ENV_PROFILE=envs/<name>.env)"
