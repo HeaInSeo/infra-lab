@@ -6,6 +6,7 @@ import (
 )
 
 func TestCreatePlanEnvUp(t *testing.T) {
+	t.Setenv("INFRA_LAB_PLAN_STORE", t.TempDir())
 	raw, err := createPlan([]string{"env_up", "profile=lab"})
 	if err != nil {
 		t.Fatal(err)
@@ -26,6 +27,7 @@ func TestCreatePlanEnvUp(t *testing.T) {
 }
 
 func TestCreatePlanRebuild(t *testing.T) {
+	t.Setenv("INFRA_LAB_PLAN_STORE", t.TempDir())
 	raw, err := createPlan([]string{"rebuild", "env=lab", "profile=lab"})
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +45,7 @@ func TestCreatePlanRebuild(t *testing.T) {
 }
 
 func TestCreatePlanAddonUninstall(t *testing.T) {
+	t.Setenv("INFRA_LAB_PLAN_STORE", t.TempDir())
 	raw, err := createPlan([]string{"addon_uninstall", "env=lab", "addon=metrics-server"})
 	if err != nil {
 		t.Fatal(err)

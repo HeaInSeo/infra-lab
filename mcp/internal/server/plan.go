@@ -5,6 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -92,7 +95,36 @@ func createPlan(args []string) (string, error) {
 	if err := enc.Encode(env); err != nil {
 		return "", err
 	}
+	if err := writePlan(data.PlanID, buf.Bytes()); err != nil {
+		return "", err
+	}
 	return buf.String(), nil
+}
+
+func writePlan(planID string, data []byte) error {
+	dir, err := planStoreDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create plan store: %w", err)
+	}
+	path := filepath.Join(dir, planID+".json")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("write plan: %w", err)
+	}
+	return nil
+}
+
+func planStoreDir() (string, error) {
+	if dir := os.Getenv("INFRA_LAB_PLAN_STORE"); dir != "" {
+		return dir, nil
+	}
+	root, err := infraLabRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "state", ".plans"), nil
 }
 
 func planDestructive(action string) bool {
