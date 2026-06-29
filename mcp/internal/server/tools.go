@@ -44,6 +44,20 @@ type profileWriteArg struct {
 	StateDir string `json:"stateDir,omitempty"`
 }
 
+type addonPrepareArg struct {
+	Env   string `json:"env"`
+	Addon string `json:"addon"`
+}
+
+type addonCommitArg struct {
+	OperationID   string `json:"operationId"`
+	ApprovalToken string `json:"approvalToken"`
+}
+
+type operationArg struct {
+	OperationID string `json:"operationId"`
+}
+
 func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	handlers := map[string]toolHandler{}
 	add := func(capability, name, description string, schema map[string]any, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
@@ -83,6 +97,10 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_clone", "Clone a profile into the user profile directory without overwriting existing files.", profileWriteSchema(true), profileWriteArgs("clone"), 30*time.Second)
 	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_save_as", "Create a new profile in the user profile directory without touching infrastructure.", profileWriteSchema(false), profileWriteArgs("save_as"), 30*time.Second)
 	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_validate_and_save", "Validate and save a new profile in the user profile directory.", profileWriteSchema(false), profileWriteArgs("validate_and_save"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_prepare", "Prepare an approved addon install operation.", addonPrepareSchema(), addonPrepareArgs(), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_commit", "Commit a prepared addon install operation after approval.", addonCommitSchema(), addonCommitArgs(), 15*time.Minute)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_status", "Read an infra-lab operation status record.", operationSchema(), operationArgs("status"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_logs", "Read stdout/stderr logs for an infra-lab operation.", operationSchema(), operationArgs("logs"), 30*time.Second)
 
 	return handlers
 }
@@ -129,6 +147,13 @@ func addTool(handlers map[string]toolHandler, name, description string, schema m
 				}
 				return toolResult{Content: []toolContent{{Type: "text", Text: out}}}, nil
 			}
+			if len(args) > 0 && args[0] == "__operation__" {
+				out, err := handleOperation(args[1:], timeout)
+				if err != nil {
+					return toolResult{}, err
+				}
+				return toolResult{Content: []toolContent{{Type: "text", Text: out}}}, nil
+			}
 			out, isErr, err := runILab(args, timeout)
 			if err != nil {
 				return toolResult{}, err
@@ -138,6 +163,51 @@ func addTool(handlers map[string]toolHandler, name, description string, schema m
 				IsError: isErr,
 			}, nil
 		},
+	}
+}
+
+func addonPrepareArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed addonPrepareArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.Env == "" {
+			return nil, fmt.Errorf("env is required")
+		}
+		if parsed.Addon == "" {
+			return nil, fmt.Errorf("addon is required")
+		}
+		return []string{"__operation__", "addon_install_prepare", "env=" + parsed.Env, "addon=" + parsed.Addon}, nil
+	}
+}
+
+func addonCommitArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed addonCommitArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.OperationID == "" {
+			return nil, fmt.Errorf("operationId is required")
+		}
+		if parsed.ApprovalToken == "" {
+			return nil, fmt.Errorf("approvalToken is required")
+		}
+		return []string{"__operation__", "addon_install_commit", "operationId=" + parsed.OperationID, "approvalToken=" + parsed.ApprovalToken}, nil
+	}
+}
+
+func operationArgs(action string) func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed operationArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.OperationID == "" {
+			return nil, fmt.Errorf("operationId is required")
+		}
+		return []string{"__operation__", action, "operationId=" + parsed.OperationID}, nil
 	}
 }
 
@@ -414,6 +484,41 @@ func profileWriteSchema(clone bool) map[string]any {
 		"type":                 "object",
 		"properties":           properties,
 		"required":             required,
+		"additionalProperties": false,
+	}
+}
+
+func addonPrepareSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"env":   map[string]any{"type": "string"},
+			"addon": map[string]any{"type": "string"},
+		},
+		"required":             []string{"env", "addon"},
+		"additionalProperties": false,
+	}
+}
+
+func addonCommitSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"operationId":   map[string]any{"type": "string"},
+			"approvalToken": map[string]any{"type": "string"},
+		},
+		"required":             []string{"operationId", "approvalToken"},
+		"additionalProperties": false,
+	}
+}
+
+func operationSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"operationId": map[string]any{"type": "string"},
+		},
+		"required":             []string{"operationId"},
 		"additionalProperties": false,
 	}
 }
