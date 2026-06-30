@@ -3,6 +3,7 @@ SHELL       := /usr/bin/env bash
 .DEFAULT_GOAL := check
 
 ILAB_BIN := bin/ilab
+MCP_BIN  := bin/infra-lab-mcp
 
 .PHONY: build
 build:
@@ -10,6 +11,20 @@ build:
 	@mkdir -p bin
 	@cd ilab && go build -o ../$(ILAB_BIN) .
 	@echo "[OK] $(ILAB_BIN)"
+
+.PHONY: build-mcp
+build-mcp:
+	@echo "==> build infra-lab MCP server"
+	@mkdir -p bin
+	@cd mcp && go build -o ../$(MCP_BIN) ./cmd/infra-lab-mcp
+	@echo "[OK] $(MCP_BIN)"
+
+.PHONY: test-mcp
+test-mcp:
+	@echo "==> test infra-lab MCP server"
+	@cd mcp && go test ./...
+	@$(MAKE) build-mcp
+	@echo "[OK] test-mcp"
 
 .PHONY: install
 install:
@@ -115,6 +130,7 @@ help:
 	@echo "  lint-go     gofmt + go vet + go build"
 	@echo "  test-go     go test ./..."
 	@echo "  test-contract  Validate ilab JSON contract tests"
+	@echo "  test-mcp    Test and build MCP stdio server"
 	@echo ""
 	@echo "Environment targets:"
 	@echo "  env-up      Create cluster    (ENV_PROFILE=envs/<name>.env)"
@@ -124,4 +140,5 @@ help:
 	@echo ""
 	@echo "CLI targets:"
 	@echo "  build       Build ilab CLI binary to bin/ilab"
+	@echo "  build-mcp   Build MCP stdio server to bin/infra-lab-mcp"
 	@echo "  install     Install ilab CLI to GOPATH/bin"

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "infra-lab": {
+      "command": "/path/to/infra-lab/bin/infra-lab-mcp",
+      "args": ["--transport", "stdio"],
+      "env": {
+        "INFRA_LAB_ROOT": "/path/to/infra-lab"
+      }
+    }
+  }
+}
