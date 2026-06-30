@@ -9,7 +9,9 @@ Stage 6에서는 새 환경 생성만 허용한다.
 
 ```text
 infra_lab.env_up_prepare
+infra_lab.operation_approve
 infra_lab.env_up_commit
+infra_lab.operation_cancel
 infra_lab.operation_status
 infra_lab.operation_logs
 ```
@@ -20,7 +22,9 @@ infra_lab.operation_logs
 - profile validate를 통과한 profile만 prepare할 수 있다.
 - state/<env>가 이미 있으면 prepare와 commit 모두 거부한다.
 - prepare 없이 commit할 수 없다.
-- commit에는 operationId와 approvalToken이 필요하다.
+- prepare 후 operation_approve로 명시 승인할 수 있다.
+- APPROVED operation은 operationId만으로 commit할 수 있다.
+- token mode client는 commit에 approvalToken을 함께 넘겨도 된다.
 - approvalToken은 prepare 대상과 commit 대상의 동일성 보장 장치다.
 - env 단위 lock을 획득한 뒤 실행한다.
 - audit 기록에 실패하면 env up은 실행하지 않는다.
@@ -89,6 +93,14 @@ bin/ilab env up <profile>
 ```
 
 MCP client는 실행 명령 문자열이나 추가 flag를 만들 수 없다.
+
+명시 승인 흐름:
+
+```text
+env_up_prepare
+  → operation_approve
+  → env_up_commit
+```
 
 ## Operation Store
 

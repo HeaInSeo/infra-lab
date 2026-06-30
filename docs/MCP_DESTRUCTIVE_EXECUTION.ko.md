@@ -15,6 +15,10 @@ infra_lab.env_rebuild_prepare
 infra_lab.env_rebuild_commit
 infra_lab.addon_uninstall_prepare
 infra_lab.addon_uninstall_commit
+infra_lab.operation_approve
+infra_lab.operation_cancel
+infra_lab.operation_locks
+infra_lab.operation_unlock_stale
 infra_lab.operation_status
 infra_lab.operation_logs
 ```
@@ -23,7 +27,9 @@ infra_lab.operation_logs
 
 ```text
 - prepare 없이 commit할 수 없다.
-- commit에는 operationId와 approvalToken이 필요하다.
+- prepare 후 operation_approve로 명시 승인할 수 있다.
+- APPROVED operation은 operationId만으로 commit할 수 있다.
+- token mode client는 commit에 approvalToken을 함께 넘겨도 된다.
 - 모든 destructive operation은 risk=HIGH, destructive=true다.
 - env 단위 lock을 획득한 뒤 실행한다.
 - audit 기록에 실패하면 실행하지 않는다.
@@ -99,3 +105,20 @@ make test-mcp
 
 개발 환경에서는 prepare/status/logs를 먼저 검증한다.
 commit 계열은 실제 lab 자원을 삭제하거나 재생성하므로 live lab에서만 실행한다.
+VM 생성/삭제/재빌드 검증은 로컬 개발 장비가 아니라 원격 lab 장비에서만 수행한다.
+
+명시 승인 흐름:
+
+```text
+env_down_prepare
+  → operation_approve
+  → env_down_commit
+```
+
+stale lock 복구 흐름:
+
+```text
+operation_locks
+  → stale=true 확인
+  → operation_unlock_stale
+```
