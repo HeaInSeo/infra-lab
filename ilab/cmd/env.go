@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/HeaInSeo/infra-lab/ilab/internal/lab"
+	"github.com/HeaInSeo/infra-lab/ilab/internal/output"
 )
 
 var envCmd = &cobra.Command{
@@ -105,6 +106,9 @@ func runEnvList(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	if wantsJSON() {
+		return output.WriteJSON(os.Stdout, output.Success("env.list", envListPayload(envs)))
+	}
 	if len(envs) == 0 {
 		fmt.Println("No managed environments found under state/")
 		fmt.Println()
@@ -139,6 +143,24 @@ func runEnvStatus(_ *cobra.Command, args []string) error {
 	envName := ""
 	if len(args) > 0 {
 		envName = args[0]
+	}
+	if wantsJSON() {
+		if envName != "" {
+			env, err := lab.LoadEnv(root, envName)
+			if err != nil {
+				return output.WrapError("ENV_NOT_FOUND", err.Error(), output.ExitDomain, err)
+			}
+			return output.WriteJSON(os.Stdout, output.Success("env.status", envStatusPayload(root, env)))
+		}
+		envs, err := lab.ListEnvs(root)
+		if err != nil {
+			return err
+		}
+		payloads := make([]envStatusData, 0, len(envs))
+		for _, env := range envs {
+			payloads = append(payloads, envStatusPayload(root, env))
+		}
+		return output.WriteJSON(os.Stdout, output.Success("env.status", map[string]any{"envs": payloads}))
 	}
 	return lab.PrintEnvStatus(root, envName)
 }

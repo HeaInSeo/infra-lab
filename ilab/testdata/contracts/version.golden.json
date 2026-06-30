@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "command": "version",
+  "contractVersion": "infra-lab.contract/v1",
+  "data": {
+    "infraLabVersion": "dev",
+    "gitCommit": "unknown",
+    "buildDate": "unknown"
+  },
+  "warnings": [],
+  "errors": []
+}

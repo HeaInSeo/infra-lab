@@ -449,7 +449,7 @@ func readBuildJSONSSH(user, ip, vmName string) (*BuildInfo, error) {
 	return &info, nil
 }
 
-func resolveKubeconfig(root, envName string) (string, error) {
+func ResolveKubeconfig(root, envName string) (string, error) {
 	if envName != "" {
 		e, err := LoadEnv(root, envName)
 		if err != nil {
@@ -470,4 +470,8 @@ func resolveKubeconfig(root, envName string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no kubeconfig found; specify env with 'ilab k8s status <env-name>'")
+}
+
+func resolveKubeconfig(root, envName string) (string, error) {
+	return ResolveKubeconfig(root, envName)
 }

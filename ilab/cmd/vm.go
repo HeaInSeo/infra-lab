@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/HeaInSeo/infra-lab/ilab/internal/lab"
+	"github.com/HeaInSeo/infra-lab/ilab/internal/output"
 )
 
 var vmListAll bool
@@ -48,6 +49,14 @@ func runVMList(_ *cobra.Command, _ []string) error {
 	root, err := lab.FindRoot()
 	if err != nil {
 		return err
+	}
+
+	if wantsJSON() {
+		data, warnings, err := vmListPayload(root, vmListAll)
+		if err != nil {
+			return err
+		}
+		return output.WriteJSON(os.Stdout, output.Success("vm.list", data, warnings...))
 	}
 
 	if vmListAll {
@@ -117,6 +126,12 @@ func runVMVersion(_ *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if wantsJSON() {
+		return output.WriteJSON(os.Stdout, output.Success("vm.version", vmVersionData{
+			VM:    vmName,
+			Build: info,
+		}))
+	}
 	info.Print(os.Stdout)
 	return nil
 }
@@ -132,4 +147,54 @@ func runVMSSH(_ *cobra.Command, args []string) error {
 		return err
 	}
 	return env.SSH(vmName)
+}
+
+func vmListPayload(root string, includeAll bool) (vmListData, []output.Warning, error) {
+	if includeAll {
+		vms, err := lab.ListAllVMs(root)
+		if err != nil {
+			return vmListData{}, nil, output.WrapError("VM_RUNTIME_NOT_FOUND", err.Error(), output.ExitDomain, err)
+		}
+		return vmListData{VMs: vmPayloads(vms, nil)}, nil, nil
+	}
+
+	envs, err := lab.ListEnvs(root)
+	if err != nil {
+		return vmListData{}, nil, err
+	}
+	all := []vmData{}
+	warnings := []output.Warning{}
+	for _, env := range envs {
+		vms, err := env.ListVMs()
+		if err != nil {
+			warnings = append(warnings, output.Warning{
+				Code:    "VM_LIST_FAILED",
+				Message: err.Error(),
+				Field:   env.Name,
+			})
+			continue
+		}
+		all = append(all, vmPayloads(vms, env)...)
+	}
+	return vmListData{VMs: all}, warnings, nil
+}
+
+func vmPayloads(vms []lab.VMInfo, env *lab.Env) []vmData {
+	out := make([]vmData, 0, len(vms))
+	for _, vm := range vms {
+		item := vmData{
+			Name:    vm.Name,
+			Managed: vm.Managed,
+			Env:     vm.EnvName,
+			State:   vm.State,
+			IPv4:    vm.IPv4,
+		}
+		if env != nil {
+			item.Managed = true
+			item.Env = env.Name
+			item.Backend = env.Backend
+		}
+		out = append(out, item)
+	}
+	return out
 }

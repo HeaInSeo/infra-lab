@@ -173,6 +173,24 @@ type StateSpec struct {
 	Dir string `yaml:"dir"`
 }
 
+type ProfileLocation struct {
+	Path      string
+	Source    string
+	IsExample bool
+}
+
+func ResolveProfileLocation(path string) (ProfileLocation, error) {
+	resolved, isExample, err := resolveProfilePath(path)
+	if err != nil {
+		return ProfileLocation{}, err
+	}
+	return ProfileLocation{
+		Path:      resolved,
+		Source:    profileSource(path, resolved),
+		IsExample: isExample,
+	}, nil
+}
+
 // LoadProfile loads a profile from the given path argument.
 //
 // Search order (stops at first match):
@@ -217,6 +235,26 @@ func LoadProfile(path string) (*Profile, error) {
 	}
 
 	return &p, nil
+}
+
+func profileSource(input, resolved string) string {
+	if filepath.IsAbs(input) || strings.ContainsRune(input, filepath.Separator) {
+		return "explicit"
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		userDir := filepath.Join(home, ".config", "infra-lab", "profiles")
+		if rel, err := filepath.Rel(userDir, resolved); err == nil && !strings.HasPrefix(rel, "..") {
+			return "user"
+		}
+	}
+	if root, err := FindRoot(); err == nil {
+		envsDir := filepath.Join(root, "envs")
+		if rel, err := filepath.Rel(envsDir, resolved); err == nil && !strings.HasPrefix(rel, "..") {
+			return "repo"
+		}
+	}
+	return "explicit"
 }
 
 // resolveProfilePath returns the actual file path for a profile name/path,
