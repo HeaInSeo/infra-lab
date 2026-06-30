@@ -69,6 +69,10 @@ type operationArg struct {
 	OperationID string `json:"operationId"`
 }
 
+type operationUnlockArg struct {
+	Env string `json:"env"`
+}
+
 func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	handlers := map[string]toolHandler{}
 	add := func(capability, name, description string, schema map[string]any, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
@@ -112,6 +116,10 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_commit", "Commit a prepared addon install operation after approval.", addonCommitSchema(), addonCommitArgs(), 15*time.Minute)
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_status", "Read an infra-lab operation status record.", operationSchema(), operationArgs("status"), 30*time.Second)
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_logs", "Read stdout/stderr logs for an infra-lab operation.", operationSchema(), operationArgs("logs"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_approve", "Approve a prepared infra-lab operation before commit.", operationSchema(), operationArgs("approve"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_cancel", "Cancel a prepared or approved infra-lab operation before it runs.", operationSchema(), operationArgs("cancel"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_locks", "List current infra-lab env locks.", emptySchema(), noArgs("__operation__", "locks"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_unlock_stale", "Remove an expired env lock only when it is stale.", operationUnlockSchema(), operationUnlockArgs(), 30*time.Second)
 	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_prepare", "Prepare an approved new environment creation operation.", envUpPrepareSchema(), envUpPrepareArgs(), 30*time.Second)
 	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_commit", "Commit a prepared new environment creation operation after approval.", addonCommitSchema(), envUpCommitArgs(), 30*time.Minute)
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_down_prepare", "Prepare an approved destructive env down operation.", destructivePrepareSchema(false, false), destructivePrepareArgs("env_down_prepare"), 30*time.Second)
@@ -212,10 +220,11 @@ func addonCommitArgs() func(json.RawMessage) ([]string, error) {
 		if parsed.OperationID == "" {
 			return nil, fmt.Errorf("operationId is required")
 		}
-		if parsed.ApprovalToken == "" {
-			return nil, fmt.Errorf("approvalToken is required")
+		out := []string{"__operation__", "addon_install_commit", "operationId=" + parsed.OperationID}
+		if parsed.ApprovalToken != "" {
+			out = append(out, "approvalToken="+parsed.ApprovalToken)
 		}
-		return []string{"__operation__", "addon_install_commit", "operationId=" + parsed.OperationID, "approvalToken=" + parsed.ApprovalToken}, nil
+		return out, nil
 	}
 }
 
@@ -245,10 +254,11 @@ func envUpCommitArgs() func(json.RawMessage) ([]string, error) {
 		if parsed.OperationID == "" {
 			return nil, fmt.Errorf("operationId is required")
 		}
-		if parsed.ApprovalToken == "" {
-			return nil, fmt.Errorf("approvalToken is required")
+		out := []string{"__operation__", "env_up_commit", "operationId=" + parsed.OperationID}
+		if parsed.ApprovalToken != "" {
+			out = append(out, "approvalToken="+parsed.ApprovalToken)
 		}
-		return []string{"__operation__", "env_up_commit", "operationId=" + parsed.OperationID, "approvalToken=" + parsed.ApprovalToken}, nil
+		return out, nil
 	}
 }
 
@@ -281,10 +291,11 @@ func destructiveCommitArgs(action string) func(json.RawMessage) ([]string, error
 		if parsed.OperationID == "" {
 			return nil, fmt.Errorf("operationId is required")
 		}
-		if parsed.ApprovalToken == "" {
-			return nil, fmt.Errorf("approvalToken is required")
+		out := []string{"__operation__", action, "operationId=" + parsed.OperationID}
+		if parsed.ApprovalToken != "" {
+			out = append(out, "approvalToken="+parsed.ApprovalToken)
 		}
-		return []string{"__operation__", action, "operationId=" + parsed.OperationID, "approvalToken=" + parsed.ApprovalToken}, nil
+		return out, nil
 	}
 }
 
@@ -298,6 +309,19 @@ func operationArgs(action string) func(json.RawMessage) ([]string, error) {
 			return nil, fmt.Errorf("operationId is required")
 		}
 		return []string{"__operation__", action, "operationId=" + parsed.OperationID}, nil
+	}
+}
+
+func operationUnlockArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed operationUnlockArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.Env == "" {
+			return nil, fmt.Errorf("env is required")
+		}
+		return []string{"__operation__", "unlock_stale", "env=" + parsed.Env}, nil
 	}
 }
 
@@ -597,7 +621,7 @@ func addonCommitSchema() map[string]any {
 			"operationId":   map[string]any{"type": "string"},
 			"approvalToken": map[string]any{"type": "string"},
 		},
-		"required":             []string{"operationId", "approvalToken"},
+		"required":             []string{"operationId"},
 		"additionalProperties": false,
 	}
 }
@@ -609,6 +633,17 @@ func operationSchema() map[string]any {
 			"operationId": map[string]any{"type": "string"},
 		},
 		"required":             []string{"operationId"},
+		"additionalProperties": false,
+	}
+}
+
+func operationUnlockSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"env": map[string]any{"type": "string"},
+		},
+		"required":             []string{"env"},
 		"additionalProperties": false,
 	}
 }
