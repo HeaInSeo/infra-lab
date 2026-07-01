@@ -13,7 +13,7 @@ remote host:
 
 remote checkout:
   codex/fix-mcp-addon-scope
-  commit c2f6b1e
+  commit 8b2492c
 
 MCP server:
   remote checkout의 bin/infra-lab-mcp
@@ -141,6 +141,79 @@ steps:
 
 정리 후 `operation_locks`는 빈 목록이고, Multipass에는 기존 `podbridge5-dev`만 남았다.
 
+이후 같은 원격 장비에서 Multipass 파일쓰기 경로를 재확인했다.
+
+```text
+podbridge5-dev 대상 multipass exec stdin 파일쓰기: 성공
+```
+
+남은 state dir 때문에 재시도가 막히는 것을 확인했고, `env_clean`이 target env를
+명시하도록 MCP 구현을 보강했다.
+
+```text
+operationId: op_20260701_094439_env_clean
+status: SUCCEEDED
+target: mcp-live-multipass
+result: state/mcp-live-multipass removed
+```
+
+재시도한 env up은 성공했다.
+
+```text
+operationId: op_20260701_094505_env_up
+status: SUCCEEDED
+steps:
+  validate profile: succeeded
+  collect pre-snapshot: succeeded
+  run env up: succeeded
+  collect post-snapshot: succeeded
+```
+
+생성된 클러스터 상태:
+
+```text
+env: mcp-live-multipass
+backend: multipass
+cni: flannel
+nodesReady: 2
+podsNotReady: 0
+risk: LOW
+```
+
+VM build metadata도 확인했다.
+
+```text
+lab-master-0:
+  envName: mcp-live-multipass
+  backend: multipass
+  cni: flannel
+  role: control-plane
+
+lab-worker-0:
+  envName: mcp-live-multipass
+  backend: multipass
+  cni: flannel
+  role: worker
+```
+
+성공 검증 후 테스트 VM과 state를 정리했다.
+
+```text
+operationId: op_20260701_095410_env_down
+status: SUCCEEDED
+
+operationId: op_20260701_095729_env_clean
+status: SUCCEEDED
+```
+
+최종 상태:
+
+```text
+operation_locks: []
+state/mcp-live-multipass: removed
+multipass VMs: 기존 podbridge5-dev만 남음
+```
+
 ## 결론
 
 완료:
@@ -152,19 +225,21 @@ steps:
 - addon install prepare/approve/commit 3회 반복 성공
 - 실패 operation의 status/logs 기반 원인 추적 검증
 - 실패한 env_up의 부분 VM 정리 env_down 성공
+- env_clean target env 지정 보강 및 검증
+- env_up prepare/approve/commit 성공 경로 검증
+- env_down prepare/approve/commit 성공 경로 검증
+- env_clean prepare/approve/commit 성공 경로 검증
 ```
 
 남은 항목:
 
 ```text
-- 원격 Multipass/snap core22 상태 복구 후 env_up 성공 재검증
-- env_up 성공 후 env_down/clean/rebuild 전체 성공 경로 재검증
+- rebuild 성공 경로는 별도 긴 작업으로 남긴다.
 ```
 
 현재 9점대 개선 과제 기준 진행률:
 
 ```text
-완료 3.5 / 전체 4
-진행률 87.5%
+완료 4 / 전체 4
+진행률 100%
 ```
-
