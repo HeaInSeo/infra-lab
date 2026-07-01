@@ -29,7 +29,8 @@ infra_lab.operation_logs
 - env 단위 lock을 획득한 뒤 실행한다.
 - audit 기록에 실패하면 addon install은 실행하지 않는다.
 - stdout/stderr는 operation store에 저장한다.
-- commit은 고정된 addons-install optional <addon> 및 addons-verify optional <addon>만 실행한다.
+- commit은 고정된 addons-install/addons-verify 경로만 실행한다.
+- `metrics-server`는 base addon으로, 그 외 addon은 optional addon으로 실행한다.
 - raw shell, raw kubectl, raw ssh, raw tofu passthrough는 제공하지 않는다.
 ```
 
@@ -111,8 +112,8 @@ state/.locks/<env>.lock
 commit 실행 경로:
 
 ```text
-scripts/k8s-tool.sh addons-install optional <addon>
-scripts/k8s-tool.sh addons-verify optional <addon>
+scripts/k8s-tool.sh addons-install <base|optional> <addon>
+scripts/k8s-tool.sh addons-verify <base|optional> <addon>
 ```
 
 MCP client는 실행 명령 문자열을 만들 수 없다.

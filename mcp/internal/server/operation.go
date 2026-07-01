@@ -703,13 +703,20 @@ func runDestructiveCommand(op operationRecord, timeout time.Duration) error {
 	case "env_down":
 		return runLoggedCommand(op, timeout, filepath.Join(root, "bin", "ilab"), "env", "down", op.Target.Env)
 	case "env_clean":
-		return runLoggedCommandWithEnv(op, timeout, map[string]string{"FORCE": "1"}, "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "clean")
+		return runLoggedCommandWithEnv(op, timeout, cleanEnvVars(op.Target.Env), "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "clean")
 	case "env_rebuild":
 		return runLoggedCommand(op, timeout, filepath.Join(root, "bin", "ilab"), "env", "rebuild", op.Target.Profile, "--approve")
 	case "addon_uninstall":
-		return runLoggedCommand(op, timeout, "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "addons-uninstall", "optional", op.Target.Addon)
+		return runLoggedCommand(op, timeout, "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "addons-uninstall", addonScope(op.Target.Addon), op.Target.Addon)
 	default:
 		return fmt.Errorf("unsupported destructive tool: %s", op.Tool)
+	}
+}
+
+func cleanEnvVars(env string) map[string]string {
+	return map[string]string{
+		"FORCE":    "1",
+		"ENV_NAME": env,
 	}
 }
 
@@ -718,15 +725,23 @@ func runAddonCommand(op operationRecord, timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
+	scope := addonScope(op.Target.Addon)
 	for _, args := range [][]string{
-		{"addons-install", "optional", op.Target.Addon},
-		{"addons-verify", "optional", op.Target.Addon},
+		{"addons-install", scope, op.Target.Addon},
+		{"addons-verify", scope, op.Target.Addon},
 	} {
 		if err := runLoggedCommand(op, timeout, "bash", append([]string{filepath.Join(root, "scripts", "k8s-tool.sh")}, args...)...); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func addonScope(addon string) string {
+	if addon == "metrics-server" {
+		return "base"
+	}
+	return "optional"
 }
 
 func runLoggedCommand(op operationRecord, timeout time.Duration, command string, args ...string) error {

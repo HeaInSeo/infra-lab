@@ -43,6 +43,25 @@ func TestPrepareAddonInstallCreatesOperation(t *testing.T) {
 	}
 }
 
+func TestAddonScope(t *testing.T) {
+	if got := addonScope("metrics-server"); got != "base" {
+		t.Fatalf("metrics-server scope = %q, want base", got)
+	}
+	if got := addonScope("local-path-storage"); got != "optional" {
+		t.Fatalf("local-path-storage scope = %q, want optional", got)
+	}
+}
+
+func TestCleanEnvVarsTargetsEnv(t *testing.T) {
+	vars := cleanEnvVars("mcp-live-multipass")
+	if vars["FORCE"] != "1" {
+		t.Fatalf("FORCE = %q, want 1", vars["FORCE"])
+	}
+	if vars["ENV_NAME"] != "mcp-live-multipass" {
+		t.Fatalf("ENV_NAME = %q, want mcp-live-multipass", vars["ENV_NAME"])
+	}
+}
+
 func TestApprovalTokenRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("INFRA_LAB_CONFIG_HOME", filepath.Join(tmp, "config"))
