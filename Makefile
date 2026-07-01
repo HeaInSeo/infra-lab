@@ -4,12 +4,16 @@ SHELL       := /usr/bin/env bash
 
 ILAB_BIN := bin/ilab
 MCP_BIN  := bin/infra-lab-mcp
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo dev)
+GIT_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+ILAB_LDFLAGS := -X github.com/HeaInSeo/infra-lab/ilab/cmd.infraLabVersion=$(VERSION) -X github.com/HeaInSeo/infra-lab/ilab/cmd.gitCommit=$(GIT_COMMIT) -X github.com/HeaInSeo/infra-lab/ilab/cmd.buildDate=$(BUILD_DATE)
 
 .PHONY: build
 build:
 	@echo "==> build ilab CLI"
 	@mkdir -p bin
-	@cd ilab && go build -o ../$(ILAB_BIN) .
+	@cd ilab && go build -ldflags "$(ILAB_LDFLAGS)" -o ../$(ILAB_BIN) .
 	@echo "[OK] $(ILAB_BIN)"
 
 .PHONY: build-mcp
@@ -29,7 +33,7 @@ test-mcp:
 .PHONY: install
 install:
 	@echo "==> install ilab to GOPATH/bin"
-	@cd ilab && go install .
+	@cd ilab && go install -ldflags "$(ILAB_LDFLAGS)" .
 	@echo "[OK] ilab installed"
 
 TF_DIRS := . backends/libvirt
