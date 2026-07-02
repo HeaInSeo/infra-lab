@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.7.4 - 2026-07-02
+
+### Added
+
+- Added `Env.ReadOSRelease()`; `ilab vm version` (text, `--json`, and `infra_lab.vm_version` over MCP) now reports guest OS info (`os.id`, `os.prettyName`, `os.versionId`, `os.versionCodename`) read live from `/etc/os-release`, distinct from a profile's requested `vm.osImage`.
+- Added a `Backend` field to `VMInfo`; `ilab doctor`'s "VMs (all backends)" table, `ilab vm list --all`, and `infra_lab.doctor`/`infra_lab.vm_list_all` now show which provider (multipass/libvirt) reported each VM, including unmanaged ones.
+
+### Fixed
+
+- Fixed `ListAllVMs` computing VM→env attribution with its own first-prefix-match loop instead of the disambiguation logic added for #25; `ilab doctor`'s VM table was still misattributing VMs to a stale env when name_prefixes collided. Extracted `resolveEnvForVMName` as the single shared resolver used by both `FindEnvForVM` and `ListAllVMs`. (#23)
+
+### Validated
+
+- `make test-go`
+- End-to-end on remote host via the actual MCP JSON-RPC protocol: `infra_lab.vm_version` returns correct guest OS info for `lab-master-0`; `infra_lab.doctor` shows `backend: libvirt` for all VMs (including unmanaged `tori-lustre-lab`) and correctly attributes managed VMs to `test-wizard-env` instead of the stale env.
+
 ## v0.7.3 - 2026-07-02
 
 ### Added
