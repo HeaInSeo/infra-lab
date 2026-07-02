@@ -106,8 +106,9 @@ bin/infra-lab-mcp
 ```text
 1. 상태 점검
 2. Codex에 MCP 등록
-3. Claude 설정 JSON 보기
-4. 종료
+3. Claude Code에 MCP 등록
+4. Claude 설정 JSON 보기
+5. 종료
 ```
 
 권장 순서:
@@ -115,12 +116,14 @@ bin/infra-lab-mcp
 ```text
 1번 상태 점검
   → ready=true 확인
-2번 Codex에 MCP 등록
-  → Codex 재시작 또는 새 세션 열기
+2번 Codex에 MCP 등록 (또는 3번 Claude Code에 MCP 등록)
+  → Codex/Claude Code 재시작 또는 새 세션 열기
 ```
 
-Claude Desktop은 설정 파일 위치와 병합 방식이 환경마다 다를 수 있다.
-따라서 현재 단계에서는 3번으로 설정 JSON을 확인한 뒤 Claude 설정에 반영한다.
+Claude Code CLI는 `claude mcp add`로 codex와 동일하게 자동 등록된다 (3번, scope: user로 전역 등록).
+
+Claude Desktop(GUI 앱)은 설정 파일 위치와 병합 방식이 환경마다 다를 수 있다.
+따라서 Claude Desktop은 4번으로 설정 JSON을 확인한 뒤 Claude Desktop 설정에 직접 반영한다.
 
 ## 4. MCP 서버 실행 방식
 

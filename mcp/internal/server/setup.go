@@ -167,8 +167,9 @@ func RunSetupMenu(r io.Reader, w io.Writer) error {
 		fmt.Fprintln(w, "")
 		fmt.Fprintln(w, "1. 상태 점검")
 		fmt.Fprintln(w, "2. Codex에 MCP 등록")
-		fmt.Fprintln(w, "3. Claude 설정 JSON 보기")
-		fmt.Fprintln(w, "4. 종료")
+		fmt.Fprintln(w, "3. Claude Code에 MCP 등록")
+		fmt.Fprintln(w, "4. Claude 설정 JSON 보기")
+		fmt.Fprintln(w, "5. 종료")
 		fmt.Fprint(w, "\n선택: ")
 
 		line, err := reader.ReadString('\n')
@@ -194,17 +195,24 @@ func RunSetupMenu(r io.Reader, w io.Writer) error {
 				fmt.Fprintln(w, out)
 			}
 		case "3":
+			out, err := InstallClaudeMCP()
+			if err != nil {
+				fmt.Fprintf(w, "Claude Code 등록 실패: %v\n\n", err)
+			} else {
+				fmt.Fprintln(w, out)
+			}
+		case "4":
 			out, err := ClientConfigText("claude")
 			if err != nil {
 				fmt.Fprintf(w, "Claude 설정 생성 실패: %v\n\n", err)
 			} else {
 				fmt.Fprintln(w, out)
 			}
-		case "4", "q", "quit", "exit":
+		case "5", "q", "quit", "exit":
 			fmt.Fprintln(w, "종료합니다.")
 			return nil
 		default:
-			fmt.Fprintln(w, "1, 2, 3, 4 중에서 선택하세요.")
+			fmt.Fprintln(w, "1, 2, 3, 4, 5 중에서 선택하세요.")
 		}
 
 		if err == io.EOF {
@@ -250,6 +258,46 @@ func InstallCodexMCP() (string, error) {
 		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return "Codex MCP 서버 'infra-lab' 등록이 완료되었습니다. Codex를 재시작하거나 새 세션을 여세요.", nil
+}
+
+func InstallClaudeMCP() (string, error) {
+	info, err := bootstrap()
+	if err != nil {
+		return "", err
+	}
+	raw, err := setupCheckJSON(info, nil)
+	if err != nil {
+		return "", err
+	}
+	var env setupEnvelope
+	if err := json.Unmarshal([]byte(raw), &env); err != nil {
+		return "", err
+	}
+	if !env.Data.Ready {
+		return "", fmt.Errorf("setup check is not ready")
+	}
+
+	if _, err := exec.LookPath("claude"); err != nil {
+		return "", fmt.Errorf("claude CLI not found in PATH")
+	}
+	get := exec.Command("claude", "mcp", "get", "infra-lab")
+	if err := get.Run(); err == nil {
+		return "Claude Code MCP 서버 'infra-lab'이 이미 등록되어 있습니다. Claude Code를 재시작하거나 새 세션을 여세요.", nil
+	}
+
+	cmd := exec.Command(
+		"claude", "mcp", "add", "infra-lab",
+		"--scope", "user",
+		"--env", "INFRA_LAB_ROOT="+env.Data.Root,
+		"--",
+		env.Data.Server.Executable,
+		"--transport", "stdio",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return "Claude Code MCP 서버 'infra-lab' 등록이 완료되었습니다 (scope: user). Claude Code를 재시작하거나 새 세션을 여세요.", nil
 }
 
 func setupCheckJSON(info bootstrapInfo, handlers map[string]toolHandler) (string, error) {
