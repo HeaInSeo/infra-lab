@@ -16,6 +16,8 @@
 처음 연결되면 다음 순서로 확인한다.
 
 ```text
+infra_lab.setup_check
+infra_lab.what_can_i_do
 infra_lab.version
 infra_lab.capabilities
 infra_lab.doctor
@@ -27,8 +29,28 @@ infra_lab.env_list
 
 ```text
 - MCP tool capability 확인
+- 실제 등록된 MCP tool catalog 확인
 - lab root와 prerequisite 확인
 - 사용 가능한 profile/env 확인
+```
+
+`what_can_i_do` 결과를 기준으로 사용자가 "무엇을 할 수 있나?"를 물었을 때는 다음 범주를 구분해서 답한다.
+
+```text
+- 조회/진단
+- 증거 수집
+- 계획 전용
+- profile 파일 작성
+- 승인형 실행
+- 파괴적 승인형 실행
+- operation 관리
+```
+
+특히 `operation_approve`만 보고 "승인만 가능하다"고 답하지 않는다.
+prepare/commit 계열 tool이 catalog에 있으면 다음 흐름이 가능하다고 설명한다.
+
+```text
+plan-only → prepare → operation_approve → commit → operation_status/logs
 ```
 
 ## 2. 상태 진단
@@ -196,6 +218,12 @@ EXPIRED
 ## 8. 권장 프롬프트
 
 상태 조회:
+
+```text
+infra-lab MCP로 what_can_i_do를 실행하고 가능한 작업을 카테고리별로 보여줘.
+```
+
+상태 진단:
 
 ```text
 infra-lab snapshot을 수집하고 health, findings, warnings만 근거로 요약해줘.

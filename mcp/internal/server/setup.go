@@ -28,6 +28,7 @@ type setupCheckData struct {
 	Binaries     []setupBinaryStatus    `json:"binaries"`
 	Bootstrap    setupBootstrapStatus   `json:"bootstrap"`
 	Capabilities []string               `json:"capabilities"`
+	Tools        toolCatalog            `json:"tools"`
 	Clients      map[string]setupClient `json:"clients"`
 	Findings     []setupFinding         `json:"findings"`
 	NextSteps    []string               `json:"nextSteps"`
@@ -77,7 +78,7 @@ func addSetupCheckTool(handlers map[string]toolHandler, info bootstrapInfo) {
 			InputSchema: emptySchema(),
 		},
 		call: func(_ json.RawMessage) (toolResult, error) {
-			raw, err := setupCheckJSON(info)
+			raw, err := setupCheckJSON(info, handlers)
 			if err != nil {
 				return toolResult{}, err
 			}
@@ -91,7 +92,7 @@ func SetupCheckText() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	raw, err := setupCheckJSON(info)
+	raw, err := setupCheckJSON(info, nil)
 	if err != nil {
 		return "", err
 	}
@@ -108,6 +109,16 @@ func SetupCheckText() (string, error) {
 	fmt.Fprintf(&b, "version: %s\n", env.Data.Bootstrap.InfraLabVersion)
 	fmt.Fprintf(&b, "contract: %s\n", env.Data.Bootstrap.ContractVersion)
 	fmt.Fprintf(&b, "capabilities: %d\n", len(env.Data.Capabilities))
+	fmt.Fprintf(&b, "tools: %d total\n", env.Data.Tools.Summary.Total)
+	fmt.Fprintf(&b, "  readOnly=%d evidence=%d planOnly=%d profileWrite=%d approvedMutation=%d destructive=%d operation=%d\n",
+		env.Data.Tools.Summary.ReadOnly,
+		env.Data.Tools.Summary.Evidence,
+		env.Data.Tools.Summary.PlanOnly,
+		env.Data.Tools.Summary.ProfileWrite,
+		env.Data.Tools.Summary.ApprovedMutation,
+		env.Data.Tools.Summary.Destructive,
+		env.Data.Tools.Summary.Operation,
+	)
 	fmt.Fprintf(&b, "\nbinaries:\n")
 	for _, bin := range env.Data.Binaries {
 		fmt.Fprintf(&b, "  - %s: exists=%t executable=%t path=%s\n", bin.Name, bin.Exists, bin.Executable, bin.Path)
@@ -130,7 +141,7 @@ func ClientConfigText(client string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	raw, err := setupCheckJSON(info)
+	raw, err := setupCheckJSON(info, nil)
 	if err != nil {
 		return "", err
 	}
@@ -207,7 +218,7 @@ func InstallCodexMCP() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	raw, err := setupCheckJSON(info)
+	raw, err := setupCheckJSON(info, nil)
 	if err != nil {
 		return "", err
 	}
@@ -241,7 +252,7 @@ func InstallCodexMCP() (string, error) {
 	return "Codex MCP 서버 'infra-lab' 등록이 완료되었습니다. Codex를 재시작하거나 새 세션을 여세요.", nil
 }
 
-func setupCheckJSON(info bootstrapInfo) (string, error) {
+func setupCheckJSON(info bootstrapInfo, handlers map[string]toolHandler) (string, error) {
 	root, err := infraLabRoot()
 	if err != nil {
 		return "", err
@@ -315,6 +326,7 @@ func setupCheckJSON(info bootstrapInfo) (string, error) {
 				ContractVersion: info.ContractVersion,
 			},
 			Capabilities: capabilities,
+			Tools:        toolCatalogFromHandlers(handlersForCatalog(info, handlers)),
 			Clients:      clients,
 			Findings:     findings,
 			NextSteps: []string{

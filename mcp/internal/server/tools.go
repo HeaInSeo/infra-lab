@@ -92,6 +92,7 @@ func readOnlyTools(info bootstrapInfo) map[string]toolHandler {
 	}
 
 	addSetupCheckTool(handlers, info)
+	addWhatCanIDoTool(handlers)
 	add("version.v1", "infra_lab.version", "Show infra-lab version metadata.", emptySchema(), noArgs("version"), 30*time.Second)
 	add("capabilities.v1", "infra_lab.capabilities", "Show ilab JSON contract capabilities.", emptySchema(), noArgs("capabilities"), 30*time.Second)
 	add("doctor.v1", "infra_lab.doctor", "Diagnose infra-lab prerequisites and local state.", emptySchema(), noArgs("doctor"), 30*time.Second)

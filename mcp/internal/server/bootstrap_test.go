@@ -29,6 +29,9 @@ func TestReadOnlyToolsFilteredByCapability(t *testing.T) {
 	if _, ok := tools["infra_lab.setup_check"]; !ok {
 		t.Fatal("expected infra_lab.setup_check")
 	}
+	if _, ok := tools["infra_lab.what_can_i_do"]; !ok {
+		t.Fatal("expected infra_lab.what_can_i_do")
+	}
 	if _, ok := tools["infra_lab.version"]; !ok {
 		t.Fatal("expected infra_lab.version")
 	}

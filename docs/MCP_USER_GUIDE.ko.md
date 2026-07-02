@@ -209,6 +209,10 @@ contract:
 capabilities:
   ilab이 현재 제공한다고 선언한 기능 수다.
   MCP 서버는 이 capability 목록을 보고 tool을 등록한다.
+
+tools:
+  MCP 서버가 현재 실제로 등록한 tool 목록을 카테고리별로 요약한다.
+  capabilities가 ilab 기능 선언이라면, tools는 agent가 호출할 수 있는 MCP tool 목록이다.
 ```
 
 `capabilities`는 MCP tool 자체가 아니라, `ilab --json`이 안정적으로 제공하는 기능 이름이다.
@@ -249,6 +253,57 @@ profile.show.v1:
 
 profile.validate.v1:
   ilab profile validate --json 사용 가능
+```
+
+Tool catalog:
+
+```text
+tools.summary.total:
+  현재 MCP 서버에 등록된 전체 tool 수다.
+
+tools.summary.readOnly:
+  version, doctor, env_status, vm_list 같은 조회 도구 수다.
+
+tools.summary.evidence:
+  collect_snapshot, summarize_health 같은 증거 수집 도구 수다.
+
+tools.summary.planOnly:
+  up_plan, down_plan, rebuild_plan 같은 실행 없는 계획 도구 수다.
+
+tools.summary.profileWrite:
+  profile_save_as, profile_clone 같은 profile 파일 write 도구 수다.
+
+tools.summary.approvedMutation:
+  addon_install, env_up처럼 승인 후 실행 가능한 변경 도구 수다.
+
+tools.summary.destructive:
+  env_down, env_clean, env_rebuild, addon_uninstall처럼 파괴적 변경 도구 수다.
+
+tools.summary.operation:
+  operation_approve, operation_status, operation_logs 같은 operation 관리 도구 수다.
+```
+
+agent가 "무엇을 할 수 있어?"라고 물었을 때는 `infra_lab.what_can_i_do`를 먼저 호출하는 것이 좋다.
+이 tool은 현재 등록된 MCP tool을 다음처럼 구분해서 반환한다.
+
+```text
+조회/진단
+증거 수집
+계획 전용
+profile 파일 작성
+승인형 실행
+파괴적 승인형 실행
+operation 관리
+```
+
+중요한 차이:
+
+```text
+capabilities:
+  ilab --json이 제공하는 기능 선언
+
+tools:
+  MCP client/agent가 실제 호출할 수 있는 tool 목록
 ```
 
 바이너리 상태:
@@ -296,6 +351,7 @@ ready=false:
 
 ```text
 infra_lab.setup_check
+infra_lab.what_can_i_do
 infra_lab.version
 infra_lab.capabilities
 infra_lab.doctor
