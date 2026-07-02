@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.7.3 - 2026-07-02
+
+### Added
+
+- Added `Env.TerraformResourceCount()`; `ilab env list`/`ilab doctor` (text, `--json`, and MCP) now report a `stale` field / `STALE_ENV_EMPTY_STATE` finding for envs whose `state/` directory exists but whose terraform state has zero resources.
+- Added a `DUPLICATE_NAME_PREFIX` finding to `ilab doctor` when multiple managed envs share the same `name_prefix`.
+
+### Fixed
+
+- Fixed `ilab env list`/`doctor` silently listing destroyed-but-uncleaned envs as live managed environments. (#24)
+- Fixed `FindEnvForVM` resolving a VM name to the wrong env when multiple envs share a `name_prefix`; it now disambiguates using live terraform state and errors on genuine (multiple-live-match) ambiguity instead of guessing. (#25)
+
+### Validated
+
+- `make test-go`
+- End-to-end on remote host: `ilab env list`/`doctor` correctly flag `remote-seoy-libvirt-flannel` as stale; `ilab vm version lab-master-0` still resolves correctly to `test-wizard-env` despite the shared `name_prefix=lab`.
+
 ## v0.7.2 - 2026-07-02
 
 ### Added
