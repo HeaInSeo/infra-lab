@@ -92,9 +92,13 @@ func runDoctor(_ *cobra.Command, _ []string) error {
 		fmt.Println("  (none)")
 	} else {
 		ew := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(ew, "  ENV\tBACKEND\tCNI\tCREATED")
+		fmt.Fprintln(ew, "  ENV\tBACKEND\tCNI\tCREATED\tSTALE")
 		for _, e := range envs {
-			fmt.Fprintf(ew, "  %s\t%s\t%s\t%s\n", e.Name, e.Backend, e.CNI, e.CreatedAt)
+			stale := ""
+			if count, err := e.TerraformResourceCount(); err == nil && count == 0 {
+				stale = "yes (0 terraform resources)"
+			}
+			fmt.Fprintf(ew, "  %s\t%s\t%s\t%s\t%s\n", e.Name, e.Backend, e.CNI, e.CreatedAt, stale)
 		}
 		_ = ew.Flush()
 	}
@@ -198,6 +202,16 @@ func doctorPayload(root string) doctorData {
 		})
 	}
 
+	envItems := envListPayload(envs).Envs
+	for _, item := range envItems {
+		if item.Stale {
+			findings = append(findings, doctorFindingData{
+				Code:    "STALE_ENV_EMPTY_STATE",
+				Message: fmt.Sprintf("env %q has a state/ directory but terraform reports 0 resources — it may have been destroyed without running 'ilab env down'", item.Name),
+			})
+		}
+	}
+
 	vmData := []doctorVMData{}
 	vms, err := lab.ListAllVMs(root)
 	if err != nil {
@@ -233,7 +247,7 @@ func doctorPayload(root string) doctorData {
 	return doctorData{
 		Root:          root,
 		Prerequisites: prereqData,
-		Envs:          envListPayload(envs).Envs,
+		Envs:          envItems,
 		LegacyFiles:   legacy,
 		VMs:           vmData,
 		Health:        doctorHealthData{Risk: risk, Summary: summary},

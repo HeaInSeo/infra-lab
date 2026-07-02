@@ -24,6 +24,9 @@ type envListItemData struct {
 	Status    string `json:"status"`
 	CreatedAt string `json:"createdAt,omitempty"`
 	GitCommit string `json:"gitCommit,omitempty"`
+	// Stale is true when state/<name>/ exists but terraform reports zero
+	// resources for it — the env was likely destroyed without cleanup.
+	Stale bool `json:"stale"`
 }
 
 type envListData struct {
@@ -166,6 +169,7 @@ type vmVersionData struct {
 func envListPayload(envs []*lab.Env) envListData {
 	items := make([]envListItemData, 0, len(envs))
 	for _, env := range envs {
+		count, err := env.TerraformResourceCount()
 		items = append(items, envListItemData{
 			Name:      env.Name,
 			Source:    "state",
@@ -175,6 +179,7 @@ func envListPayload(envs []*lab.Env) envListData {
 			Status:    "present",
 			CreatedAt: env.CreatedAt,
 			GitCommit: env.GitCommit,
+			Stale:     err == nil && count == 0,
 		})
 	}
 	return envListData{Envs: items}

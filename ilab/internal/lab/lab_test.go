@@ -240,6 +240,67 @@ func TestLoadEnv_MissingMeta(t *testing.T) {
 	}
 }
 
+// ── TerraformResourceCount ───────────────────────────────────────────────
+
+func TestTerraformResourceCount_MissingFile(t *testing.T) {
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "no-state-file", "libvirt", "flannel", "lab")
+	env, err := LoadEnv(tmp, "no-state-file")
+	must(t, err)
+
+	count, err := env.TerraformResourceCount()
+	if err != nil {
+		t.Fatalf("TerraformResourceCount() error = %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for missing state file", count)
+	}
+}
+
+func TestTerraformResourceCount_EmptyResources(t *testing.T) {
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "stale-env", "libvirt", "flannel", "lab")
+	env, err := LoadEnv(tmp, "stale-env")
+	must(t, err)
+	must(t, os.WriteFile(env.StateFile, []byte(`{"version":4,"resources":[],"outputs":{}}`), 0644))
+
+	count, err := env.TerraformResourceCount()
+	if err != nil {
+		t.Fatalf("TerraformResourceCount() error = %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for empty resources array", count)
+	}
+}
+
+func TestTerraformResourceCount_HasResources(t *testing.T) {
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "live-env", "libvirt", "flannel", "lab")
+	env, err := LoadEnv(tmp, "live-env")
+	must(t, err)
+	must(t, os.WriteFile(env.StateFile, []byte(`{"version":4,"resources":[{"type":"libvirt_domain"},{"type":"libvirt_volume"}],"outputs":{}}`), 0644))
+
+	count, err := env.TerraformResourceCount()
+	if err != nil {
+		t.Fatalf("TerraformResourceCount() error = %v", err)
+	}
+	if count != 2 {
+		t.Errorf("count = %d, want 2", count)
+	}
+}
+
+func TestTerraformResourceCount_InvalidJSON(t *testing.T) {
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "broken-state", "libvirt", "flannel", "lab")
+	env, err := LoadEnv(tmp, "broken-state")
+	must(t, err)
+	must(t, os.WriteFile(env.StateFile, []byte("not json"), 0644))
+
+	if _, err := env.TerraformResourceCount(); err == nil {
+		t.Error("TerraformResourceCount() expected error for invalid JSON, got nil")
+	}
+}
+
 // ── ListEnvs ──────────────────────────────────────────────────────────────
 
 func TestListEnvs_NoStateDir(t *testing.T) {

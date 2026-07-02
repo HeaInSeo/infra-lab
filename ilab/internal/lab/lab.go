@@ -125,6 +125,28 @@ func LoadEnv(root, name string) (*Env, error) {
 	}, nil
 }
 
+// TerraformResourceCount reads e.StateFile and returns how many resources
+// terraform believes it owns for this env. A missing state file counts as
+// zero (infra was never applied); this does not distinguish that case from
+// a state file whose "resources" array was emptied by a destroy — both mean
+// there is no real infrastructure behind this env's state/ directory.
+func (e *Env) TerraformResourceCount() (int, error) {
+	data, err := os.ReadFile(e.StateFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var state struct {
+		Resources []json.RawMessage `json:"resources"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return 0, fmt.Errorf("parse %s: %w", e.StateFile, err)
+	}
+	return len(state.Resources), nil
+}
+
 // FindEnvForVM finds which environment a VM belongs to by matching its name prefix.
 // Falls back to a minimal multipass env so basic operations still work without state/.
 func FindEnvForVM(root, vmName string) (*Env, error) {
