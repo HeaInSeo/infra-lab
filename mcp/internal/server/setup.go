@@ -87,20 +87,33 @@ func addSetupCheckTool(handlers map[string]toolHandler, info bootstrapInfo) {
 	}
 }
 
-func SetupCheckText() (string, error) {
+// setupEnv bootstraps infra-lab and runs the setup check exactly once,
+// returning the parsed envelope for callers to format or act on.
+func setupEnv() (setupEnvelope, error) {
 	info, err := bootstrap()
 	if err != nil {
-		return "", err
+		return setupEnvelope{}, err
 	}
 	raw, err := setupCheckJSON(info, nil)
 	if err != nil {
-		return "", err
+		return setupEnvelope{}, err
 	}
 	var env setupEnvelope
 	if err := json.Unmarshal([]byte(raw), &env); err != nil {
+		return setupEnvelope{}, err
+	}
+	return env, nil
+}
+
+func SetupCheckText() (string, error) {
+	env, err := setupEnv()
+	if err != nil {
 		return "", err
 	}
+	return formatSetupCheckText(env), nil
+}
 
+func formatSetupCheckText(env setupEnvelope) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "infra-lab MCP setup check\n")
 	fmt.Fprintf(&b, "ready: %t\n", env.Data.Ready)
@@ -133,23 +146,18 @@ func SetupCheckText() (string, error) {
 	for _, step := range env.Data.NextSteps {
 		fmt.Fprintf(&b, "  - %s\n", step)
 	}
-	return b.String(), nil
+	return b.String()
 }
 
 func ClientConfigText(client string) (string, error) {
-	info, err := bootstrap()
+	env, err := setupEnv()
 	if err != nil {
 		return "", err
 	}
-	raw, err := setupCheckJSON(info, nil)
-	if err != nil {
-		return "", err
-	}
-	var env setupEnvelope
-	if err := json.Unmarshal([]byte(raw), &env); err != nil {
-		return "", err
-	}
+	return clientConfigTextFromEnv(env, client)
+}
 
+func clientConfigTextFromEnv(env setupEnvelope, client string) (string, error) {
 	switch strings.ToLower(client) {
 	case "codex":
 		return env.Data.Clients["codex"].Command + "\n", nil
@@ -162,6 +170,22 @@ func ClientConfigText(client string) (string, error) {
 
 func RunSetupMenu(r io.Reader, w io.Writer) error {
 	reader := bufio.NewReader(r)
+
+	// Bootstrap and run the setup check at most once per menu session
+	// (not once per selection) and reuse the result across choices.
+	var cachedEnv *setupEnvelope
+	loadEnv := func() (setupEnvelope, error) {
+		if cachedEnv != nil {
+			return *cachedEnv, nil
+		}
+		env, err := setupEnv()
+		if err != nil {
+			return setupEnvelope{}, err
+		}
+		cachedEnv = &env
+		return env, nil
+	}
+
 	for {
 		fmt.Fprintln(w, "infra-lab MCP setup")
 		fmt.Fprintln(w, "")
@@ -181,28 +205,43 @@ func RunSetupMenu(r io.Reader, w io.Writer) error {
 
 		switch choice {
 		case "1":
-			out, err := SetupCheckText()
+			env, err := loadEnv()
 			if err != nil {
 				fmt.Fprintf(w, "상태 점검 실패: %v\n\n", err)
 			} else {
-				fmt.Fprintln(w, out)
+				fmt.Fprintln(w, formatSetupCheckText(env))
 			}
 		case "2":
-			out, err := InstallCodexMCP()
+			env, err := loadEnv()
+			if err != nil {
+				fmt.Fprintf(w, "Codex 등록 실패: %v\n\n", err)
+				break
+			}
+			out, err := installCodexMCP(env)
 			if err != nil {
 				fmt.Fprintf(w, "Codex 등록 실패: %v\n\n", err)
 			} else {
 				fmt.Fprintln(w, out)
 			}
 		case "3":
-			out, err := InstallClaudeMCP()
+			env, err := loadEnv()
+			if err != nil {
+				fmt.Fprintf(w, "Claude Code 등록 실패: %v\n\n", err)
+				break
+			}
+			out, err := installClaudeMCP(env)
 			if err != nil {
 				fmt.Fprintf(w, "Claude Code 등록 실패: %v\n\n", err)
 			} else {
 				fmt.Fprintln(w, out)
 			}
 		case "4":
-			out, err := ClientConfigText("claude")
+			env, err := loadEnv()
+			if err != nil {
+				fmt.Fprintf(w, "Claude 설정 생성 실패: %v\n\n", err)
+				break
+			}
+			out, err := clientConfigTextFromEnv(env, "claude")
 			if err != nil {
 				fmt.Fprintf(w, "Claude 설정 생성 실패: %v\n\n", err)
 			} else {
@@ -222,18 +261,19 @@ func RunSetupMenu(r io.Reader, w io.Writer) error {
 }
 
 func InstallCodexMCP() (string, error) {
-	info, err := bootstrap()
+	env, err := setupEnv()
 	if err != nil {
 		return "", err
 	}
-	raw, err := setupCheckJSON(info, nil)
-	if err != nil {
-		return "", err
-	}
-	var env setupEnvelope
-	if err := json.Unmarshal([]byte(raw), &env); err != nil {
-		return "", err
-	}
+	return installCodexMCP(env)
+}
+
+// installCodexMCP always removes any existing 'infra-lab' registration
+// before re-adding it, so the registered command/env stays in sync with
+// the current binary path and INFRA_LAB_ROOT even after a rebuild or move.
+// The previous `mcp get` short-circuit reported "already registered"
+// without ever refreshing a stale path (infra-lab#21).
+func installCodexMCP(env setupEnvelope) (string, error) {
 	if !env.Data.Ready {
 		return "", fmt.Errorf("setup check is not ready")
 	}
@@ -241,10 +281,7 @@ func InstallCodexMCP() (string, error) {
 	if _, err := exec.LookPath("codex"); err != nil {
 		return "", fmt.Errorf("codex CLI not found in PATH")
 	}
-	get := exec.Command("codex", "mcp", "get", "infra-lab")
-	if err := get.Run(); err == nil {
-		return "Codex MCP 서버 'infra-lab'이 이미 등록되어 있습니다. Codex를 재시작하거나 새 세션을 여세요.", nil
-	}
+	_ = exec.Command("codex", "mcp", "remove", "infra-lab").Run()
 
 	cmd := exec.Command(
 		"codex", "mcp", "add", "infra-lab",
@@ -257,22 +294,22 @@ func InstallCodexMCP() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
-	return "Codex MCP 서버 'infra-lab' 등록이 완료되었습니다. Codex를 재시작하거나 새 세션을 여세요.", nil
+	return "Codex MCP 서버 'infra-lab' 등록이 완료되었습니다 (기존 등록이 있었다면 최신 경로로 갱신됨). Codex를 재시작하거나 새 세션을 여세요.", nil
 }
 
 func InstallClaudeMCP() (string, error) {
-	info, err := bootstrap()
+	env, err := setupEnv()
 	if err != nil {
 		return "", err
 	}
-	raw, err := setupCheckJSON(info, nil)
-	if err != nil {
-		return "", err
-	}
-	var env setupEnvelope
-	if err := json.Unmarshal([]byte(raw), &env); err != nil {
-		return "", err
-	}
+	return installClaudeMCP(env)
+}
+
+// installClaudeMCP mirrors installCodexMCP: always remove then re-add so
+// the registration never goes stale. Unlike codex, `claude mcp add` errors
+// on a duplicate name instead of overwriting, so the explicit remove step
+// is required here, not just a staleness nicety (infra-lab#21).
+func installClaudeMCP(env setupEnvelope) (string, error) {
 	if !env.Data.Ready {
 		return "", fmt.Errorf("setup check is not ready")
 	}
@@ -280,10 +317,7 @@ func InstallClaudeMCP() (string, error) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return "", fmt.Errorf("claude CLI not found in PATH")
 	}
-	get := exec.Command("claude", "mcp", "get", "infra-lab")
-	if err := get.Run(); err == nil {
-		return "Claude Code MCP 서버 'infra-lab'이 이미 등록되어 있습니다. Claude Code를 재시작하거나 새 세션을 여세요.", nil
-	}
+	_ = exec.Command("claude", "mcp", "remove", "infra-lab", "--scope", "user").Run()
 
 	cmd := exec.Command(
 		"claude", "mcp", "add", "infra-lab",
@@ -297,7 +331,7 @@ func InstallClaudeMCP() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
-	return "Claude Code MCP 서버 'infra-lab' 등록이 완료되었습니다 (scope: user). Claude Code를 재시작하거나 새 세션을 여세요.", nil
+	return "Claude Code MCP 서버 'infra-lab' 등록이 완료되었습니다 (scope: user, 기존 등록이 있었다면 최신 경로로 갱신됨). Claude Code를 재시작하거나 새 세션을 여세요.", nil
 }
 
 func setupCheckJSON(info bootstrapInfo, handlers map[string]toolHandler) (string, error) {
