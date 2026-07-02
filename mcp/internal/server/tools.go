@@ -73,8 +73,9 @@ type operationUnlockArg struct {
 	Env string `json:"env"`
 }
 
-func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
+func readOnlyTools(info bootstrapInfo) map[string]toolHandler {
 	handlers := map[string]toolHandler{}
+	capabilities := info.Capabilities
 	add := func(capability, name, description string, schema map[string]any, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
 		if !capabilities[capability] {
 			return
@@ -90,6 +91,7 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 		addTool(handlers, name, description, schema, ilabArgs, timeout)
 	}
 
+	addSetupCheckTool(handlers, info)
 	add("version.v1", "infra_lab.version", "Show infra-lab version metadata.", emptySchema(), noArgs("version"), 30*time.Second)
 	add("capabilities.v1", "infra_lab.capabilities", "Show ilab JSON contract capabilities.", emptySchema(), noArgs("capabilities"), 30*time.Second)
 	add("doctor.v1", "infra_lab.doctor", "Diagnose infra-lab prerequisites and local state.", emptySchema(), noArgs("doctor"), 30*time.Second)

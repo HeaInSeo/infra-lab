@@ -85,7 +85,57 @@ bin/ilab version --json
 }
 ```
 
-## 3. MCP 서버 실행
+## 3. MCP 설정 메뉴
+
+사람이 MCP JSON이나 긴 등록 명령을 직접 입력하지 않도록 setup 메뉴를 제공한다.
+
+repo 루트에서 실행한다.
+
+```bash
+make mcp-setup
+```
+
+또는 빌드된 바이너리를 직접 실행해도 된다.
+
+```bash
+bin/infra-lab-mcp
+```
+
+메뉴:
+
+```text
+1. 상태 점검
+2. Codex에 MCP 등록
+3. Claude 설정 JSON 보기
+4. 종료
+```
+
+권장 순서:
+
+```text
+1번 상태 점검
+  → ready=true 확인
+2번 Codex에 MCP 등록
+  → Codex 재시작 또는 새 세션 열기
+```
+
+Claude Desktop은 설정 파일 위치와 병합 방식이 환경마다 다를 수 있다.
+따라서 현재 단계에서는 3번으로 설정 JSON을 확인한 뒤 Claude 설정에 반영한다.
+
+## 4. MCP 서버 실행 방식
+
+일반 사용자는 MCP 서버를 직접 실행하지 않는다.
+Codex나 Claude 같은 MCP client가 서버를 실행한다.
+
+직접 실행이 필요한 경우는 setup/debug뿐이다.
+
+상태 점검:
+
+```bash
+bin/infra-lab-mcp --doctor
+```
+
+MCP client가 실행하는 실제 stdio 모드:
 
 직접 실행:
 
@@ -119,11 +169,12 @@ bin/ilab capabilities --json
 
 `version.v1`, `capabilities.v1`, contract version이 맞지 않으면 시작하지 않는다.
 
-## 4. 첫 연결 후 확인할 것
+## 5. 첫 연결 후 확인할 것
 
-처음 연결되면 read-only tool부터 호출한다.
+처음 연결되면 setup check와 read-only tool부터 호출한다.
 
 ```text
+infra_lab.setup_check
 infra_lab.version
 infra_lab.capabilities
 infra_lab.doctor
@@ -141,7 +192,7 @@ infra_lab.env_list
 - 사용 가능한 profile 목록
 ```
 
-## 5. 상태 조회와 진단
+## 6. 상태 조회와 진단
 
 특정 env의 단순 상태 조회:
 
@@ -175,7 +226,7 @@ errors
 infra-lab snapshot을 수집하고 health, findings, warnings만 근거로 현재 상태를 요약해줘.
 ```
 
-## 6. 변경 전에는 plan-only를 먼저 사용한다
+## 7. 변경 전에는 plan-only를 먼저 사용한다
 
 실행 없이 계획만 만든다.
 
@@ -206,7 +257,7 @@ targetFingerprint
 이 profile로 새 env를 만들 계획만 생성하고 risk, destructive, blocked 여부를 알려줘. 실행하지 마.
 ```
 
-## 7. Profile 생성과 저장
+## 8. Profile 생성과 저장
 
 인프라를 변경하지 않고 profile 파일만 만든다.
 
@@ -233,7 +284,7 @@ infra_lab.profile_validate
 infra_lab.up_plan
 ```
 
-## 8. 승인형 실행 기본 흐름
+## 9. 승인형 실행 기본 흐름
 
 모든 실행 작업은 3단계를 따른다.
 
@@ -281,7 +332,7 @@ infra_lab.addon_uninstall_commit
 `operation_approve` 이후에는 `operationId`만으로 commit할 수 있다.
 초기 token mode client는 `approvalToken`을 함께 넘겨도 된다.
 
-## 9. Addon install 예시
+## 10. Addon install 예시
 
 대상 env에 addon install을 준비한다.
 
@@ -333,7 +384,7 @@ metrics-server는 base addon으로 처리된다.
 그 외 addon은 optional addon으로 처리된다.
 ```
 
-## 10. 새 env 생성 예시
+## 11. 새 env 생성 예시
 
 새 env를 만들기 전 profile을 준비한다.
 
@@ -389,7 +440,7 @@ env_up_commit은 실제 VM과 Kubernetes cluster를 만든다.
 원격 lab 장비의 MCP server 또는 원격 checkout 기준으로 실행한다.
 ```
 
-## 11. env down / clean
+## 12. env down / clean
 
 테스트 env를 내릴 때:
 
@@ -417,7 +468,7 @@ infra_lab.operation_locks
 infra_lab.env_list
 ```
 
-## 12. 실패 처리
+## 13. 실패 처리
 
 실패하면 추측하지 말고 operation record와 log를 먼저 본다.
 
@@ -444,7 +495,7 @@ stderr
 operation_status와 operation_logs를 보고 실패 단계를 특정해줘. 추측하지 말고 로그 근거만 사용해줘.
 ```
 
-## 13. Lock 확인과 stale lock 해제
+## 14. Lock 확인과 stale lock 해제
 
 실행 중 operation은 env lock을 잡는다.
 
@@ -467,7 +518,7 @@ infra_lab.operation_unlock_stale
 - raw unlock tool은 제공하지 않음
 ```
 
-## 14. Operation 취소
+## 15. Operation 취소
 
 아직 실행하지 않은 operation은 취소할 수 있다.
 
@@ -492,7 +543,7 @@ CANCELLED
 EXPIRED
 ```
 
-## 15. 원격 lab 사용 주의사항
+## 16. 원격 lab 사용 주의사항
 
 VM lifecycle commit은 원격 lab 장비에서만 수행한다.
 
@@ -515,7 +566,7 @@ env_rebuild_commit
 - 작업 후 operation_locks가 비었는지 확인
 ```
 
-## 16. 실제 검증된 v0.7.0 흐름
+## 17. 실제 검증된 v0.7.0 흐름
 
 v0.7.0에서 원격 lab 장비로 검증한 항목:
 
@@ -535,7 +586,7 @@ v0.7.0에서 원격 lab 장비로 검증한 항목:
 docs/MCP_LIVE_VALIDATION_2026-07-01.ko.md
 ```
 
-## 17. 관련 문서
+## 18. 관련 문서
 
 ```text
 docs/MCP_READONLY.ko.md
@@ -550,4 +601,3 @@ docs/MCP_LIVE_VALIDATION_2026-07-01.ko.md
 docs/contracts/ILAB_JSON_CONTRACT.ko.md
 docs/contracts/ILAB_COMMAND_DATA_SCHEMA.ko.md
 ```
-

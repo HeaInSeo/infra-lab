@@ -93,7 +93,11 @@ func TestApprovalTokenRoundTrip(t *testing.T) {
 }
 
 func TestOperationToolsRegisteredWithRequiredCapabilities(t *testing.T) {
-	handlers := readOnlyTools(map[string]bool{"env.status.v1": true, "profile.validate.v1": true})
+	handlers := readOnlyTools(bootstrapInfo{
+		InfraLabVersion: "dev",
+		ContractVersion: supportedContractVersion,
+		Capabilities:    map[string]bool{"env.status.v1": true, "profile.validate.v1": true},
+	})
 	for _, name := range []string{
 		"infra_lab.addon_install_prepare",
 		"infra_lab.addon_install_commit",

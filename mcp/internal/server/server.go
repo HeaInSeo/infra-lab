@@ -20,7 +20,7 @@ func New() (*Server, error) {
 		return nil, err
 	}
 	return &Server{
-		tools:      readOnlyTools(info.Capabilities),
+		tools:      readOnlyTools(info),
 		bootstrap:  info,
 		serverName: "infra-lab-mcp",
 	}, nil

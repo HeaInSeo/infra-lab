@@ -30,6 +30,10 @@ test-mcp:
 	@$(MAKE) build-mcp
 	@echo "[OK] test-mcp"
 
+.PHONY: mcp-setup
+mcp-setup: build build-mcp
+	@INFRA_LAB_ROOT="$(CURDIR)" $(MCP_BIN) --setup
+
 .PHONY: install
 install:
 	@echo "==> install ilab to GOPATH/bin"
@@ -135,6 +139,7 @@ help:
 	@echo "  test-go     go test ./..."
 	@echo "  test-contract  Validate ilab JSON contract tests"
 	@echo "  test-mcp    Test and build MCP stdio server"
+	@echo "  mcp-setup   Open the MCP setup menu"
 	@echo ""
 	@echo "Environment targets:"
 	@echo "  env-up      Create cluster    (ENV_PROFILE=envs/<name>.env)"
