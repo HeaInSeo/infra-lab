@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.7.1 - 2026-07-02
+
+### Added
+
+- Added `infra-lab-mcp --setup` interactive setup menu.
+- Added `infra-lab-mcp --doctor` setup readiness check.
+- Added `infra_lab.setup_check` tool output details for binaries, readiness, and tool category summary.
+- Added `infra_lab.what_can_i_do` tool for categorized MCP capability discovery and safe execution flows.
+- Added MCP tool discovery sprint design documentation.
+
+### Changed
+
+- Updated MCP user guide with setup menu, setup check field explanations, and tool catalog documentation.
+- Updated agent workflow guidance to call `setup_check` and `what_can_i_do` before summarizing available actions.
+
+### Validated
+
+- `make test-mcp`
+- Local MCP `tools/list`
+- Local MCP `infra_lab.what_can_i_do`
+- Local `infra-lab-mcp --doctor`
+
 ## v0.7.0 - 2026-07-02
 
 ### Added
@@ -25,4 +47,3 @@
 - Remote MCP read-only smoke against the Tailscale-connected lab host.
 - Remote addon install prepare/approve/commit repeated 3 times against `test-wizard-env`.
 - Remote `mcp-live-multipass` env up/down/clean prepare/approve/commit success path.
-
