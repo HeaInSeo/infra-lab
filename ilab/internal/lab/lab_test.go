@@ -422,6 +422,76 @@ func TestFindEnvForVM_PrefixMustMatch(t *testing.T) {
 	}
 }
 
+func writeState(t *testing.T, env *Env, resourceCount int) {
+	t.Helper()
+	resources := make([]string, resourceCount)
+	for i := range resources {
+		resources[i] = `{"type":"libvirt_domain"}`
+	}
+	body := fmt.Sprintf(`{"version":4,"resources":[%s],"outputs":{}}`, strings.Join(resources, ","))
+	must(t, os.WriteFile(env.StateFile, []byte(body), 0644))
+}
+
+func TestFindEnvForVM_DuplicatePrefix_OneLive(t *testing.T) {
+	// Two envs share name_prefix "lab"; only one has live terraform resources.
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "stale-env", "libvirt", "flannel", "lab")
+	makeEnv(t, tmp, "live-env", "libvirt", "cilium", "lab")
+
+	staleEnv, err := LoadEnv(tmp, "stale-env")
+	must(t, err)
+	writeState(t, staleEnv, 0)
+
+	liveEnv, err := LoadEnv(tmp, "live-env")
+	must(t, err)
+	writeState(t, liveEnv, 3)
+
+	env, err := FindEnvForVM(tmp, "lab-master-0")
+	if err != nil {
+		t.Fatalf("FindEnvForVM() error = %v", err)
+	}
+	if env.Name != "live-env" {
+		t.Errorf("env.Name = %q, want live-env (the one with live terraform state)", env.Name)
+	}
+}
+
+func TestFindEnvForVM_DuplicatePrefix_NoneLive(t *testing.T) {
+	// Two envs share name_prefix "lab"; neither has live terraform resources.
+	// No real infra is at stake, so this must not error — just pick one.
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "env-a", "libvirt", "flannel", "lab")
+	makeEnv(t, tmp, "env-b", "libvirt", "cilium", "lab")
+
+	env, err := FindEnvForVM(tmp, "lab-master-0")
+	if err != nil {
+		t.Fatalf("FindEnvForVM() error = %v, want no error when no matching env is live", err)
+	}
+	if env.Name != "env-a" && env.Name != "env-b" {
+		t.Errorf("env.Name = %q, want env-a or env-b", env.Name)
+	}
+}
+
+func TestFindEnvForVM_DuplicatePrefix_BothLive(t *testing.T) {
+	// Two envs share name_prefix "lab" and both genuinely have live
+	// terraform resources — this is real, unresolvable ambiguity.
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "env-a", "libvirt", "flannel", "lab")
+	makeEnv(t, tmp, "env-b", "libvirt", "cilium", "lab")
+
+	envA, err := LoadEnv(tmp, "env-a")
+	must(t, err)
+	writeState(t, envA, 2)
+
+	envB, err := LoadEnv(tmp, "env-b")
+	must(t, err)
+	writeState(t, envB, 5)
+
+	_, err = FindEnvForVM(tmp, "lab-master-0")
+	if err == nil {
+		t.Fatal("FindEnvForVM() expected error for genuine ambiguity, got nil")
+	}
+}
+
 // ── BuildInfo.Print ───────────────────────────────────────────────────────
 
 func TestBuildInfoPrint(t *testing.T) {

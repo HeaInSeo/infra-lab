@@ -149,18 +149,52 @@ func (e *Env) TerraformResourceCount() (int, error) {
 
 // FindEnvForVM finds which environment a VM belongs to by matching its name prefix.
 // Falls back to a minimal multipass env so basic operations still work without state/.
+//
+// Multiple envs can share the same name_prefix (nothing currently prevents
+// it), which makes prefix matching alone ambiguous. When more than one env
+// matches, this disambiguates using TerraformResourceCount: an env with no
+// terraform resources cannot be the one that actually created the VM. If
+// more than one matching env genuinely has live resources, the ambiguity
+// is real and this returns an error instead of silently guessing.
 func FindEnvForVM(root, vmName string) (*Env, error) {
 	envs, err := ListEnvs(root)
 	if err != nil {
 		return nil, err
 	}
+	var matches []*Env
 	for _, e := range envs {
 		if strings.HasPrefix(vmName, e.NamePrefix+"-") {
-			return e, nil
+			matches = append(matches, e)
 		}
 	}
-	// No matching env: return a minimal env for direct multipass access.
-	return &Env{Root: root, Backend: "multipass", NamePrefix: "lab"}, nil
+	if len(matches) == 0 {
+		// No matching env: return a minimal env for direct multipass access.
+		return &Env{Root: root, Backend: "multipass", NamePrefix: "lab"}, nil
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+
+	var live []*Env
+	for _, e := range matches {
+		if count, err := e.TerraformResourceCount(); err == nil && count > 0 {
+			live = append(live, e)
+		}
+	}
+	switch len(live) {
+	case 1:
+		return live[0], nil
+	case 0:
+		// None of the matching envs have live infra; which one we return
+		// doesn't affect any real operation, so keep the original behavior.
+		return matches[0], nil
+	default:
+		names := make([]string, len(live))
+		for i, e := range live {
+			names[i] = fmt.Sprintf("%s (name_prefix %q)", e.Name, e.NamePrefix)
+		}
+		return nil, fmt.Errorf("VM %q: ambiguous env — multiple envs with live terraform state match this VM name: %s", vmName, strings.Join(names, ", "))
+	}
 }
 
 // ListVMs returns VMs belonging to this environment.

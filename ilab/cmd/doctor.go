@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -188,6 +190,27 @@ func doctorPayload(root string) doctorData {
 		findings = append(findings, doctorFindingData{
 			Code:    "ENV_LIST_FAILED",
 			Message: err.Error(),
+		})
+	}
+
+	prefixEnvs := map[string][]string{}
+	for _, e := range envs {
+		prefixEnvs[e.NamePrefix] = append(prefixEnvs[e.NamePrefix], e.Name)
+	}
+	prefixes := make([]string, 0, len(prefixEnvs))
+	for prefix := range prefixEnvs {
+		prefixes = append(prefixes, prefix)
+	}
+	sort.Strings(prefixes)
+	for _, prefix := range prefixes {
+		names := prefixEnvs[prefix]
+		if len(names) < 2 {
+			continue
+		}
+		sort.Strings(names)
+		findings = append(findings, doctorFindingData{
+			Code:    "DUPLICATE_NAME_PREFIX",
+			Message: fmt.Sprintf("envs share name_prefix %q, which makes VM-to-env resolution ambiguous: %s", prefix, strings.Join(names, ", ")),
 		})
 	}
 
