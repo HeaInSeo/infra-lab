@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.7.2 - 2026-07-02
+
+### Added
+
+- Added `infra-lab-mcp --setup` menu option to auto-register the MCP server with Claude Code CLI (`claude mcp add`, scope: user), matching the existing Codex registration flow.
+
+### Fixed
+
+- Fixed `InstallCodexMCP`/`InstallClaudeMCP` reporting "already registered" without checking whether the registered command path/env matched the current binary; both now always remove and re-add so a rebuilt or moved binary's registration self-heals instead of going stale. (#21)
+- Fixed the setup menu re-running `bootstrap()` (and respawning `ilab version`/`ilab capabilities`) on every menu selection; the setup check now runs once per menu session and is reused across choices. (#22)
+
+### Validated
+
+- `make test-mcp`
+- End-to-end on remote host: fresh Claude Code registration, idempotent re-registration, and stale-registration self-heal for both Codex and Claude Code.
+
 ## v0.7.1 - 2026-07-02
 
 ### Added
