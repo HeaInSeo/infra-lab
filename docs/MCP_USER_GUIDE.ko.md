@@ -169,7 +169,128 @@ bin/ilab capabilities --json
 
 `version.v1`, `capabilities.v1`, contract version이 맞지 않으면 시작하지 않는다.
 
-## 5. 첫 연결 후 확인할 것
+## 5. Setup check 출력 해설
+
+상태 점검 예시:
+
+```text
+infra-lab MCP setup check
+ready: true
+root: /opt/go/src/github.com/HeaInSeo/infra-lab
+server: /opt/go/src/github.com/HeaInSeo/infra-lab/bin/infra-lab-mcp --transport stdio
+version: v0.7.0
+contract: infra-lab.contract/v1
+capabilities: 11
+```
+
+필드 의미:
+
+```text
+ready:
+  MCP 서버를 사용할 준비가 되었는지 나타낸다.
+  true면 기본 바이너리와 contract bootstrap이 정상이다.
+  false면 findings/errors를 먼저 확인해야 한다.
+
+root:
+  MCP 서버가 infra-lab 저장소 루트로 인식한 경로다.
+  이 경로를 기준으로 bin/ilab, state/, envs/ 등을 찾는다.
+
+server:
+  MCP client가 실행할 MCP 서버 바이너리와 transport 정보다.
+  --transport stdio는 Codex/Claude가 stdin/stdout으로 통신한다는 뜻이다.
+
+version:
+  bin/ilab version --json에서 확인한 infra-lab 버전이다.
+
+contract:
+  ilab --json과 MCP가 합의한 JSON contract 버전이다.
+  현재는 infra-lab.contract/v1을 사용한다.
+
+capabilities:
+  ilab이 현재 제공한다고 선언한 기능 수다.
+  MCP 서버는 이 capability 목록을 보고 tool을 등록한다.
+```
+
+`capabilities`는 MCP tool 자체가 아니라, `ilab --json`이 안정적으로 제공하는 기능 이름이다.
+예를 들어 `env.status.v1` capability가 있어야 MCP 서버가 `infra_lab.env_status` tool을 안전하게 등록한다.
+
+대표 capability:
+
+```text
+version.v1:
+  ilab version --json 사용 가능
+
+capabilities.v1:
+  ilab capabilities --json 사용 가능
+
+doctor.v1:
+  ilab doctor --json 사용 가능
+
+env.list.v1:
+  ilab env list --json 사용 가능
+
+env.status.v1:
+  ilab env status --json 사용 가능
+
+k8s.status.v1:
+  ilab k8s status --json 사용 가능
+
+vm.list.v1:
+  ilab vm list --json 사용 가능
+
+vm.version.v1:
+  ilab vm version --json 사용 가능
+
+profile.list.v1:
+  ilab profile list --json 사용 가능
+
+profile.show.v1:
+  ilab profile show --json 사용 가능
+
+profile.validate.v1:
+  ilab profile validate --json 사용 가능
+```
+
+바이너리 상태:
+
+```text
+binaries:
+  ilab:
+    MCP 서버가 내부적으로 호출하는 CLI다.
+    exists=true, executable=true여야 한다.
+
+  infra-lab-mcp:
+    MCP 서버 자신이다.
+    exists=true, executable=true여야 한다.
+```
+
+다음 단계:
+
+```text
+next steps:
+  Ask the agent to run infra_lab.setup_check first after MCP connection.
+    MCP client에 연결한 뒤 agent에게 setup_check를 먼저 호출하게 하라는 뜻이다.
+
+  Use infra_lab.doctor for host prerequisite diagnostics.
+    host 도구, VM runtime, 기본 환경 문제는 doctor로 확인하라는 뜻이다.
+
+  Use infra_lab.collect_snapshot before diagnosing an existing lab.
+    이미 생성된 lab 문제를 진단할 때는 snapshot을 먼저 수집하라는 뜻이다.
+```
+
+판단 기준:
+
+```text
+ready=true:
+  MCP 연결 준비 완료.
+  다음으로 infra_lab.doctor 또는 infra_lab.collect_snapshot을 호출한다.
+
+ready=false:
+  MCP 서버가 정상 사용 준비 상태가 아니다.
+  findings/errors의 code와 message를 보고 build, path, permission 문제를 먼저 고친다.
+```
+
+## 6. 첫 연결 후 확인할 것
 
 처음 연결되면 setup check와 read-only tool부터 호출한다.
 
@@ -192,7 +313,7 @@ infra_lab.env_list
 - 사용 가능한 profile 목록
 ```
 
-## 6. 상태 조회와 진단
+## 7. 상태 조회와 진단
 
 특정 env의 단순 상태 조회:
 
@@ -226,7 +347,7 @@ errors
 infra-lab snapshot을 수집하고 health, findings, warnings만 근거로 현재 상태를 요약해줘.
 ```
 
-## 7. 변경 전에는 plan-only를 먼저 사용한다
+## 8. 변경 전에는 plan-only를 먼저 사용한다
 
 실행 없이 계획만 만든다.
 
@@ -257,7 +378,7 @@ targetFingerprint
 이 profile로 새 env를 만들 계획만 생성하고 risk, destructive, blocked 여부를 알려줘. 실행하지 마.
 ```
 
-## 8. Profile 생성과 저장
+## 9. Profile 생성과 저장
 
 인프라를 변경하지 않고 profile 파일만 만든다.
 
@@ -284,7 +405,7 @@ infra_lab.profile_validate
 infra_lab.up_plan
 ```
 
-## 9. 승인형 실행 기본 흐름
+## 10. 승인형 실행 기본 흐름
 
 모든 실행 작업은 3단계를 따른다.
 
@@ -332,7 +453,7 @@ infra_lab.addon_uninstall_commit
 `operation_approve` 이후에는 `operationId`만으로 commit할 수 있다.
 초기 token mode client는 `approvalToken`을 함께 넘겨도 된다.
 
-## 10. Addon install 예시
+## 11. Addon install 예시
 
 대상 env에 addon install을 준비한다.
 
@@ -384,7 +505,7 @@ metrics-server는 base addon으로 처리된다.
 그 외 addon은 optional addon으로 처리된다.
 ```
 
-## 11. 새 env 생성 예시
+## 12. 새 env 생성 예시
 
 새 env를 만들기 전 profile을 준비한다.
 
@@ -440,7 +561,7 @@ env_up_commit은 실제 VM과 Kubernetes cluster를 만든다.
 원격 lab 장비의 MCP server 또는 원격 checkout 기준으로 실행한다.
 ```
 
-## 12. env down / clean
+## 13. env down / clean
 
 테스트 env를 내릴 때:
 
@@ -468,7 +589,7 @@ infra_lab.operation_locks
 infra_lab.env_list
 ```
 
-## 13. 실패 처리
+## 14. 실패 처리
 
 실패하면 추측하지 말고 operation record와 log를 먼저 본다.
 
@@ -495,7 +616,7 @@ stderr
 operation_status와 operation_logs를 보고 실패 단계를 특정해줘. 추측하지 말고 로그 근거만 사용해줘.
 ```
 
-## 14. Lock 확인과 stale lock 해제
+## 15. Lock 확인과 stale lock 해제
 
 실행 중 operation은 env lock을 잡는다.
 
@@ -518,7 +639,7 @@ infra_lab.operation_unlock_stale
 - raw unlock tool은 제공하지 않음
 ```
 
-## 15. Operation 취소
+## 16. Operation 취소
 
 아직 실행하지 않은 operation은 취소할 수 있다.
 
@@ -543,7 +664,7 @@ CANCELLED
 EXPIRED
 ```
 
-## 16. 원격 lab 사용 주의사항
+## 17. 원격 lab 사용 주의사항
 
 VM lifecycle commit은 원격 lab 장비에서만 수행한다.
 
@@ -566,7 +687,7 @@ env_rebuild_commit
 - 작업 후 operation_locks가 비었는지 확인
 ```
 
-## 17. 실제 검증된 v0.7.0 흐름
+## 18. 실제 검증된 v0.7.0 흐름
 
 v0.7.0에서 원격 lab 장비로 검증한 항목:
 
@@ -586,7 +707,7 @@ v0.7.0에서 원격 lab 장비로 검증한 항목:
 docs/MCP_LIVE_VALIDATION_2026-07-01.ko.md
 ```
 
-## 18. 관련 문서
+## 19. 관련 문서
 
 ```text
 docs/MCP_READONLY.ko.md
