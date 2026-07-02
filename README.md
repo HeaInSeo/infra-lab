@@ -7,6 +7,7 @@ Manages cluster lifecycle across `multipass` and `libvirt` backends using OpenTo
 Includes `ilab` — a read-only CLI for inspecting environments, VMs, and cluster state.
 
 [![CI](https://github.com/HeaInSeo/infra-lab/actions/workflows/check.yml/badge.svg)](https://github.com/HeaInSeo/infra-lab/actions/workflows/check.yml)
+[![Release](https://img.shields.io/github/v/release/HeaInSeo/infra-lab)](https://github.com/HeaInSeo/infra-lab/releases/latest)
 
 ## What this repo owns
 

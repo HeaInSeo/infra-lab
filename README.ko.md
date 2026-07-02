@@ -6,6 +6,9 @@ English: [README.md](README.md)
 OpenTofu + kubeadm으로 `multipass`와 `libvirt` 두 가지 backend에서 클러스터 라이프사이클을 관리한다.
 `ilab`이라는 읽기 전용 CLI가 포함되어 있어 환경, VM, 클러스터 상태를 조회할 수 있다.
 
+[![CI](https://github.com/HeaInSeo/infra-lab/actions/workflows/check.yml/badge.svg)](https://github.com/HeaInSeo/infra-lab/actions/workflows/check.yml)
+[![Release](https://img.shields.io/github/v/release/HeaInSeo/infra-lab)](https://github.com/HeaInSeo/infra-lab/releases/latest)
+
 ## 사용자 설명서
 
 - MCP 최종 사용자 설명서: [docs/MCP_USER_GUIDE.ko.md](docs/MCP_USER_GUIDE.ko.md)
