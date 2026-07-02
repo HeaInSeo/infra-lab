@@ -6,6 +6,12 @@ English: [README.md](README.md)
 OpenTofu + kubeadm으로 `multipass`와 `libvirt` 두 가지 backend에서 클러스터 라이프사이클을 관리한다.
 `ilab`이라는 읽기 전용 CLI가 포함되어 있어 환경, VM, 클러스터 상태를 조회할 수 있다.
 
+## 사용자 설명서
+
+- MCP 최종 사용자 설명서: [docs/MCP_USER_GUIDE.ko.md](docs/MCP_USER_GUIDE.ko.md)
+- 원격 운영 기준: [docs/OPERATIONS.ko.md](docs/OPERATIONS.ko.md)
+- profile 기반 환경 관리: [docs/PROFILE_DRIVEN_ENVIRONMENTS.ko.md](docs/PROFILE_DRIVEN_ENVIRONMENTS.ko.md)
+
 ## 이 repo가 담당하는 것
 
 - 선택한 backend를 통한 kubeadm 클러스터 VM 라이프사이클
