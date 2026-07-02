@@ -101,6 +101,7 @@ type doctorPrereqData struct {
 
 type doctorVMData struct {
 	Name    string `json:"name"`
+	Backend string `json:"backend,omitempty"`
 	Managed bool   `json:"managed"`
 	Env     string `json:"env,omitempty"`
 	State   string `json:"state"`
@@ -164,6 +165,7 @@ type vmData struct {
 type vmVersionData struct {
 	VM    string         `json:"vm"`
 	Build *lab.BuildInfo `json:"build"`
+	OS    *lab.OSInfo    `json:"os,omitempty"`
 }
 
 func envListPayload(envs []*lab.Env) envListData {

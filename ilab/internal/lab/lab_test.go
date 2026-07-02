@@ -552,3 +552,62 @@ func TestListAllVMs_ManagedAnnotation(t *testing.T) {
 		}
 	}
 }
+
+// ── OSInfo / parseOSRelease ──────────────────────────────────────────────
+
+func TestParseOSRelease_Ubuntu(t *testing.T) {
+	data := []byte(`PRETTY_NAME="Ubuntu 24.04.1 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.1 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+`)
+	info := parseOSRelease(data)
+	checks := []struct{ got, want, field string }{
+		{info.ID, "ubuntu", "ID"},
+		{info.PrettyName, "Ubuntu 24.04.1 LTS", "PrettyName"},
+		{info.VersionID, "24.04", "VersionID"},
+		{info.VersionCodename, "noble", "VersionCodename"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("parseOSRelease().%s = %q, want %q", c.field, c.got, c.want)
+		}
+	}
+}
+
+func TestParseOSRelease_Empty(t *testing.T) {
+	info := parseOSRelease([]byte(""))
+	if info != (OSInfo{}) {
+		t.Errorf("parseOSRelease(empty) = %+v, want zero value", info)
+	}
+}
+
+func TestParseOSRelease_UnquotedValues(t *testing.T) {
+	data := []byte("ID=rocky\nVERSION_ID=9.4\n")
+	info := parseOSRelease(data)
+	if info.ID != "rocky" || info.VersionID != "9.4" {
+		t.Errorf("parseOSRelease() = %+v, want ID=rocky VERSION_ID=9.4", info)
+	}
+}
+
+func TestOSInfoPrint(t *testing.T) {
+	o := &OSInfo{ID: "ubuntu", PrettyName: "Ubuntu 24.04.1 LTS", VersionID: "24.04", VersionCodename: "noble"}
+	var buf bytes.Buffer
+	o.Print(&buf)
+	out := buf.String()
+	for _, want := range []string{"ubuntu", "Ubuntu 24.04.1 LTS", "24.04", "noble"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Print() output missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
+func TestOSInfoPrint_Empty(t *testing.T) {
+	// Should not panic on zero-value struct.
+	var o OSInfo
+	var buf bytes.Buffer
+	o.Print(&buf)
+}

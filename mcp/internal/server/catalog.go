@@ -249,7 +249,7 @@ func toolPurpose(name string) string {
 		"infra_lab.k8s_status":                "Kubernetes node/pod 상태를 조회한다.",
 		"infra_lab.vm_list":                   "관리 VM 목록을 조회한다.",
 		"infra_lab.vm_list_all":               "관리/비관리 VM 목록을 조회한다.",
-		"infra_lab.vm_version":                "VM 내부 infra-lab build metadata를 조회한다.",
+		"infra_lab.vm_version":                "VM 내부 infra-lab build metadata와 guest OS(/etc/os-release) 정보를 조회한다.",
 		"infra_lab.profile_list":              "사용 가능한 profile 목록을 조회한다.",
 		"infra_lab.profile_show":              "profile 정규화 내용을 조회한다.",
 		"infra_lab.profile_validate":          "profile 유효성을 검증한다.",

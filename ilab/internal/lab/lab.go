@@ -5,6 +5,7 @@ package lab
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,10 +57,33 @@ type Env struct {
 // VMInfo holds status information for a single VM.
 type VMInfo struct {
 	Name    string
+	Backend string // "multipass" or "libvirt" — which runtime reported this VM
 	State   string
 	IPv4    string
 	Managed bool   // true if the VM belongs to a known infra-lab env
 	EnvName string // env name if Managed, otherwise empty
+}
+
+// OSInfo mirrors the fields infra-lab cares about from a VM guest's
+// /etc/os-release, distinguishing the OS actually running from profile
+// intent such as vm.osImage.
+type OSInfo struct {
+	ID              string `json:"id"`
+	PrettyName      string `json:"prettyName"`
+	VersionID       string `json:"versionId"`
+	VersionCodename string `json:"versionCodename"`
+}
+
+// Print writes guest OS info as a key-value table.
+func (o *OSInfo) Print(w io.Writer) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "Guest OS:\t%s\n", o.PrettyName)
+	fmt.Fprintf(tw, "OS ID:\t%s\n", o.ID)
+	fmt.Fprintf(tw, "OS Version:\t%s\n", o.VersionID)
+	if o.VersionCodename != "" {
+		fmt.Fprintf(tw, "OS Codename:\t%s\n", o.VersionCodename)
+	}
+	_ = tw.Flush()
 }
 
 // BuildInfo mirrors /etc/infra-lab/build.json written by write-build-json.sh.
@@ -149,6 +173,24 @@ func (e *Env) TerraformResourceCount() (int, error) {
 
 // FindEnvForVM finds which environment a VM belongs to by matching its name prefix.
 // Falls back to a minimal multipass env so basic operations still work without state/.
+func FindEnvForVM(root, vmName string) (*Env, error) {
+	envs, err := ListEnvs(root)
+	if err != nil {
+		return nil, err
+	}
+	env, err := resolveEnvForVMName(envs, vmName)
+	if err != nil {
+		return nil, err
+	}
+	if env == nil {
+		// No matching env: return a minimal env for direct multipass access.
+		return &Env{Root: root, Backend: "multipass", NamePrefix: "lab"}, nil
+	}
+	return env, nil
+}
+
+// resolveEnvForVMName picks the env owning vmName out of a pre-loaded set
+// of envs, matched by name_prefix. Returns (nil, nil) when no env matches.
 //
 // Multiple envs can share the same name_prefix (nothing currently prevents
 // it), which makes prefix matching alone ambiguous. When more than one env
@@ -156,11 +198,7 @@ func (e *Env) TerraformResourceCount() (int, error) {
 // terraform resources cannot be the one that actually created the VM. If
 // more than one matching env genuinely has live resources, the ambiguity
 // is real and this returns an error instead of silently guessing.
-func FindEnvForVM(root, vmName string) (*Env, error) {
-	envs, err := ListEnvs(root)
-	if err != nil {
-		return nil, err
-	}
+func resolveEnvForVMName(envs []*Env, vmName string) (*Env, error) {
 	var matches []*Env
 	for _, e := range envs {
 		if strings.HasPrefix(vmName, e.NamePrefix+"-") {
@@ -168,8 +206,7 @@ func FindEnvForVM(root, vmName string) (*Env, error) {
 		}
 	}
 	if len(matches) == 0 {
-		// No matching env: return a minimal env for direct multipass access.
-		return &Env{Root: root, Backend: "multipass", NamePrefix: "lab"}, nil
+		return nil, nil
 	}
 	if len(matches) == 1 {
 		return matches[0], nil
@@ -219,6 +256,20 @@ func (e *Env) ReadBuildJSON(vmName string) (*BuildInfo, error) {
 		return readBuildJSONSSH("ubuntu", ip, vmName)
 	default:
 		return nil, fmt.Errorf("vm version not implemented for backend %q", e.Backend)
+	}
+}
+
+// ReadOSRelease reads /etc/os-release from a VM to report the guest OS it
+// is actually running, as opposed to the OS image a profile requested.
+func (e *Env) ReadOSRelease(vmName string) (*OSInfo, error) {
+	switch e.Backend {
+	case "multipass":
+		return readOSReleaseMultipass(vmName)
+	case "libvirt":
+		ip := libvirtVMIP(vmName)
+		return readOSReleaseSSH("ubuntu", ip, vmName)
+	default:
+		return nil, fmt.Errorf("os-release read not implemented for backend %q", e.Backend)
 	}
 }
 
@@ -332,12 +383,12 @@ func ListAllVMs(root string) ([]VMInfo, error) {
 	}
 
 	for i, vm := range vms {
-		for _, e := range envs {
-			if strings.HasPrefix(vm.Name, e.NamePrefix+"-") {
-				vms[i].Managed = true
-				vms[i].EnvName = e.Name
-				break
-			}
+		// A resolution error means the VM name is genuinely ambiguous
+		// between multiple live envs; leave it unattributed rather than
+		// guess — ilab doctor's DUPLICATE_NAME_PREFIX finding covers this.
+		if env, err := resolveEnvForVMName(envs, vm.Name); err == nil && env != nil {
+			vms[i].Managed = true
+			vms[i].EnvName = env.Name
 		}
 	}
 	return vms, nil
@@ -405,7 +456,7 @@ func listMultipassVMs(prefix string) ([]VMInfo, error) {
 		if len(v.IPv4) > 0 {
 			ip = v.IPv4[0]
 		}
-		vms = append(vms, VMInfo{Name: v.Name, State: v.State, IPv4: ip})
+		vms = append(vms, VMInfo{Name: v.Name, Backend: "multipass", State: v.State, IPv4: ip})
 	}
 	return vms, nil
 }
@@ -421,6 +472,17 @@ func readBuildJSONMultipass(vmName string) (*BuildInfo, error) {
 	if err := json.Unmarshal(out, &info); err != nil {
 		return nil, fmt.Errorf("parse build.json from %q: %w", vmName, err)
 	}
+	return &info, nil
+}
+
+func readOSReleaseMultipass(vmName string) (*OSInfo, error) {
+	out, err := exec.Command(
+		"multipass", "exec", vmName, "--", "cat", "/etc/os-release",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("VM %q: cannot read /etc/os-release: %w", vmName, err)
+	}
+	info := parseOSRelease(out)
 	return &info, nil
 }
 
@@ -454,7 +516,7 @@ func listLibvirtVMs(prefix string) ([]VMInfo, error) {
 			state = "unknown"
 		}
 		ip := libvirtVMIP(name)
-		vms = append(vms, VMInfo{Name: name, State: state, IPv4: ip})
+		vms = append(vms, VMInfo{Name: name, Backend: "libvirt", State: state, IPv4: ip})
 	}
 	return vms, nil
 }
@@ -503,6 +565,52 @@ func readBuildJSONSSH(user, ip, vmName string) (*BuildInfo, error) {
 		return nil, fmt.Errorf("parse build.json from %q: %w", vmName, err)
 	}
 	return &info, nil
+}
+
+// readOSReleaseSSH reads /etc/os-release from a VM via SSH.
+func readOSReleaseSSH(user, ip, vmName string) (*OSInfo, error) {
+	if ip == "" {
+		return nil, fmt.Errorf("VM %q: cannot determine IP address", vmName)
+	}
+	out, err := exec.Command(
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=5",
+		user+"@"+ip,
+		"cat", "/etc/os-release",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("VM %q: cannot read /etc/os-release: %w", vmName, err)
+	}
+	info := parseOSRelease(out)
+	return &info, nil
+}
+
+// parseOSRelease parses the KEY=VALUE (optionally quoted) format used by
+// /etc/os-release. Unrecognized keys are ignored.
+func parseOSRelease(data []byte) OSInfo {
+	var info OSInfo
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		k, v, ok := strings.Cut(sc.Text(), "=")
+		if !ok {
+			continue
+		}
+		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		switch strings.TrimSpace(k) {
+		case "ID":
+			info.ID = v
+		case "PRETTY_NAME":
+			info.PrettyName = v
+		case "VERSION_ID":
+			info.VersionID = v
+		case "VERSION_CODENAME":
+			info.VersionCodename = v
+		}
+	}
+	return info
 }
 
 func ResolveKubeconfig(root, envName string) (string, error) {

@@ -95,7 +95,7 @@ func runVMListAll(root string) error {
 		return err
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "VM\tMANAGED\tENV\tSTATE\tIPv4")
+	fmt.Fprintln(w, "VM\tBACKEND\tMANAGED\tENV\tSTATE\tIPv4")
 	if len(vms) == 0 {
 		fmt.Fprintln(w, "(no VMs found)")
 	}
@@ -106,8 +106,8 @@ func runVMListAll(root string) error {
 			managed = "yes"
 			envName = vm.EnvName
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			vm.Name, managed, envName, vm.State, vm.IPv4)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			vm.Name, vm.Backend, managed, envName, vm.State, vm.IPv4)
 	}
 	return w.Flush()
 }
@@ -126,13 +126,21 @@ func runVMVersion(_ *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Guest OS info is best-effort: a VM missing /etc/os-release (or
+	// unreachable for a reason build.json's read didn't already hit)
+	// shouldn't fail the whole command, just omit the OS fields.
+	osInfo, osErr := env.ReadOSRelease(vmName)
 	if wantsJSON() {
-		return output.WriteJSON(os.Stdout, output.Success("vm.version", vmVersionData{
-			VM:    vmName,
-			Build: info,
-		}))
+		data := vmVersionData{VM: vmName, Build: info}
+		if osErr == nil {
+			data.OS = osInfo
+		}
+		return output.WriteJSON(os.Stdout, output.Success("vm.version", data))
 	}
 	info.Print(os.Stdout)
+	if osErr == nil {
+		osInfo.Print(os.Stdout)
+	}
 	return nil
 }
 
@@ -184,6 +192,7 @@ func vmPayloads(vms []lab.VMInfo, env *lab.Env) []vmData {
 	for _, vm := range vms {
 		item := vmData{
 			Name:    vm.Name,
+			Backend: vm.Backend,
 			Managed: vm.Managed,
 			Env:     vm.EnvName,
 			State:   vm.State,

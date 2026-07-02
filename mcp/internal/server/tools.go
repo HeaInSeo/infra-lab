@@ -101,7 +101,7 @@ func readOnlyTools(info bootstrapInfo) map[string]toolHandler {
 	add("k8s.status.v1", "infra_lab.k8s_status", "Show Kubernetes node and pod status.", envSchema(), envArgs("k8s", "status"), 60*time.Second)
 	add("vm.list.v1", "infra_lab.vm_list", "List managed VMs.", emptySchema(), noArgs("vm", "list"), 30*time.Second)
 	add("vm.list.v1", "infra_lab.vm_list_all", "List managed and unmanaged VMs.", emptySchema(), noArgs("vm", "list", "--all"), 30*time.Second)
-	add("vm.version.v1", "infra_lab.vm_version", "Read infra-lab build metadata from a VM.", vmVersionSchema(), vmVersionArgs(), 30*time.Second)
+	add("vm.version.v1", "infra_lab.vm_version", "Read infra-lab build metadata and guest OS info from a VM.", vmVersionSchema(), vmVersionArgs(), 30*time.Second)
 	add("profile.list.v1", "infra_lab.profile_list", "List available profiles.", emptySchema(), noArgs("profile", "list"), 30*time.Second)
 	add("profile.show.v1", "infra_lab.profile_show", "Show normalized profile data.", profileSchema(), profileArgs("profile", "show"), 30*time.Second)
 	add("profile.validate.v1", "infra_lab.profile_validate", "Validate a profile.", profileSchema(), profileArgs("profile", "validate"), 30*time.Second)

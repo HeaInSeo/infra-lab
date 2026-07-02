@@ -130,7 +130,7 @@ func runDoctor(_ *cobra.Command, _ []string) error {
 		fmt.Println("  (none found)")
 	} else {
 		vw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(vw, "  NAME\tMANAGED\tENV\tSTATE\tIPv4")
+		fmt.Fprintln(vw, "  NAME\tBACKEND\tMANAGED\tENV\tSTATE\tIPv4")
 		for _, vm := range vms {
 			managed := "no"
 			envName := "-"
@@ -138,8 +138,8 @@ func runDoctor(_ *cobra.Command, _ []string) error {
 				managed = "yes"
 				envName = vm.EnvName
 			}
-			fmt.Fprintf(vw, "  %s\t%s\t%s\t%s\t%s\n",
-				vm.Name, managed, envName, vm.State, vm.IPv4)
+			fmt.Fprintf(vw, "  %s\t%s\t%s\t%s\t%s\t%s\n",
+				vm.Name, vm.Backend, managed, envName, vm.State, vm.IPv4)
 		}
 		_ = vw.Flush()
 	}
@@ -246,6 +246,7 @@ func doctorPayload(root string) doctorData {
 	for _, vm := range vms {
 		vmData = append(vmData, doctorVMData{
 			Name:    vm.Name,
+			Backend: vm.Backend,
 			Managed: vm.Managed,
 			Env:     vm.EnvName,
 			State:   vm.State,
