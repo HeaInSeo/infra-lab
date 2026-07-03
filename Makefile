@@ -32,7 +32,7 @@ install:
 	@cd ilab && go install .
 	@echo "[OK] ilab installed"
 
-TF_DIRS := . backends/libvirt
+TF_DIRS := . backends/libvirt lustre-lab
 
 # SC2191: false positive in shellcheck <0.7 for ssh -o Key=Value arrays
 # SC2029: informational — intentional client-side expansion in ssh commands

@@ -14,12 +14,12 @@ Run this module on the libvirt host, not from the tori development checkout.
 Provide a local `terraform.tfvars` file (never commit it):
 
 ```hcl
-base_image_url    = "https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
-base_image_sha256 = "<verified SHA-256>"
-ssh_public_key    = "ssh-ed25519 ..."
+base_image_url = "https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
+ssh_public_key = "ssh-ed25519 ..."
 ```
 
-Then run `tofu init`, `tofu plan`, and `tofu apply`.
+Verify the base image checksum before use. Then run `tofu init`,
+`tofu plan`, and `tofu apply`.
 
 Before applying, ensure `pool_path` is approved for VM images. This module
 does not manage existing manually-created VMs; importing or replacing the
