@@ -9,7 +9,11 @@ Stage 5에서는 `addon_install`만 허용한다.
 
 ```text
 infra_lab.addon_install_prepare
+infra_lab.operation_approve
 infra_lab.addon_install_commit
+infra_lab.operation_cancel
+infra_lab.operation_locks
+infra_lab.operation_unlock_stale
 infra_lab.operation_status
 infra_lab.operation_logs
 ```
@@ -18,12 +22,15 @@ infra_lab.operation_logs
 
 ```text
 - prepare 없이 commit할 수 없다.
-- commit에는 operationId와 approvalToken이 필요하다.
+- prepare 후 `operation_approve`로 명시 승인할 수 있다.
+- APPROVED operation은 operationId만으로 commit할 수 있다.
+- token mode client는 commit에 approvalToken을 함께 넘겨도 된다.
 - approvalToken은 사용자 승인 증명이 아니라 prepare 대상과 commit 대상의 동일성 보장 장치다.
 - env 단위 lock을 획득한 뒤 실행한다.
 - audit 기록에 실패하면 addon install은 실행하지 않는다.
 - stdout/stderr는 operation store에 저장한다.
-- commit은 고정된 addons-install optional <addon> 및 addons-verify optional <addon>만 실행한다.
+- commit은 고정된 addons-install/addons-verify 경로만 실행한다.
+- `metrics-server`는 base addon으로, 그 외 addon은 optional addon으로 실행한다.
 - raw shell, raw kubectl, raw ssh, raw tofu passthrough는 제공하지 않는다.
 ```
 
@@ -105,11 +112,19 @@ state/.locks/<env>.lock
 commit 실행 경로:
 
 ```text
-scripts/k8s-tool.sh addons-install optional <addon>
-scripts/k8s-tool.sh addons-verify optional <addon>
+scripts/k8s-tool.sh addons-install <base|optional> <addon>
+scripts/k8s-tool.sh addons-verify <base|optional> <addon>
 ```
 
 MCP client는 실행 명령 문자열을 만들 수 없다.
+
+명시 승인 흐름:
+
+```text
+addon_install_prepare
+  → operation_approve
+  → addon_install_commit
+```
 
 ## 직접 테스트
 

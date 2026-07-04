@@ -80,8 +80,13 @@ type operationArg struct {
 	OperationID string `json:"operationId"`
 }
 
-func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
+type operationUnlockArg struct {
+	Env string `json:"env"`
+}
+
+func readOnlyTools(info bootstrapInfo) map[string]toolHandler {
 	handlers := map[string]toolHandler{}
+	capabilities := info.Capabilities
 	add := func(capability, name, description string, schema map[string]any, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
 		if !capabilities[capability] {
 			return
@@ -99,6 +104,8 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 		addTool(handlers, name, description, schema, meta, ilabArgs, timeout)
 	}
 
+	addSetupCheckTool(handlers, info)
+	addWhatCanIDoTool(handlers)
 	add("version.v1", "infra_lab.version", "Show infra-lab version metadata.", emptySchema(), noArgs("version"), 30*time.Second)
 	add("capabilities.v1", "infra_lab.capabilities", "Show ilab JSON contract capabilities.", emptySchema(), noArgs("capabilities"), 30*time.Second)
 	add("doctor.v1", "infra_lab.doctor", "Diagnose infra-lab prerequisites and local state.", emptySchema(), noArgs("doctor"), 30*time.Second)
@@ -107,7 +114,7 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	add("k8s.status.v1", "infra_lab.k8s_status", "Show Kubernetes node and pod status.", envSchema(), envArgs("k8s", "status"), 60*time.Second)
 	add("vm.list.v1", "infra_lab.vm_list", "List managed VMs.", emptySchema(), noArgs("vm", "list"), 30*time.Second)
 	add("vm.list.v1", "infra_lab.vm_list_all", "List managed and unmanaged VMs.", emptySchema(), noArgs("vm", "list", "--all"), 30*time.Second)
-	add("vm.version.v1", "infra_lab.vm_version", "Read infra-lab build metadata from a VM.", vmVersionSchema(), vmVersionArgs(), 30*time.Second)
+	add("vm.version.v1", "infra_lab.vm_version", "Read infra-lab build metadata and guest OS info from a VM.", vmVersionSchema(), vmVersionArgs(), 30*time.Second)
 	add("profile.list.v1", "infra_lab.profile_list", "List available profiles.", emptySchema(), noArgs("profile", "list"), 30*time.Second)
 	add("profile.show.v1", "infra_lab.profile_show", "Show normalized profile data.", profileSchema(), profileArgs("profile", "show"), 30*time.Second)
 	add("profile.validate.v1", "infra_lab.profile_validate", "Validate a profile.", profileSchema(), profileArgs("profile", "validate"), 30*time.Second)
@@ -125,6 +132,10 @@ func readOnlyTools(capabilities map[string]bool) map[string]toolHandler {
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_commit", "Commit a prepared addon install operation after approval.", addonCommitSchema(), syntheticToolMeta("approved_mutation", "MEDIUM", false, true, "Stage 5"), addonCommitArgs(), 15*time.Minute)
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_status", "Read an infra-lab operation status record.", operationSchema(), syntheticToolMeta("operation", "LOW", false, false, "Stage 5"), operationArgs("status"), 30*time.Second)
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_logs", "Read stdout/stderr logs for an infra-lab operation.", operationSchema(), syntheticToolMeta("operation", "LOW", false, false, "Stage 5"), operationArgs("logs"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_approve", "Approve a prepared infra-lab operation before commit.", operationSchema(), syntheticToolMeta("operation", "MEDIUM", false, false, "Stage 5"), operationArgs("approve"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_cancel", "Cancel a prepared or approved infra-lab operation before it runs.", operationSchema(), syntheticToolMeta("operation", "MEDIUM", false, false, "Stage 5"), operationArgs("cancel"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_locks", "List current infra-lab env locks.", emptySchema(), syntheticToolMeta("operation", "LOW", false, false, "Stage 5"), noArgs("__operation__", "locks"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_unlock_stale", "Remove an expired env lock only when it is stale.", operationUnlockSchema(), syntheticToolMeta("operation", "MEDIUM", false, false, "Stage 5"), operationUnlockArgs(), 30*time.Second)
 	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_prepare", "Prepare an approved new environment creation operation.", envUpPrepareSchema(), syntheticToolMeta("approved_env_up", "HIGH", false, true, "Stage 6"), envUpPrepareArgs(), 30*time.Second)
 	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_commit", "Commit a prepared new environment creation operation after approval.", addonCommitSchema(), syntheticToolMeta("approved_env_up", "HIGH", false, true, "Stage 6"), envUpCommitArgs(), 30*time.Minute)
 	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_down_prepare", "Prepare an approved destructive env down operation.", destructivePrepareSchema(false, false), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructivePrepareArgs("env_down_prepare"), 30*time.Second)
@@ -251,10 +262,11 @@ func addonCommitArgs() func(json.RawMessage) ([]string, error) {
 		if parsed.OperationID == "" {
 			return nil, fmt.Errorf("operationId is required")
 		}
-		if parsed.ApprovalToken == "" {
-			return nil, fmt.Errorf("approvalToken is required")
+		out := []string{"__operation__", "addon_install_commit", "operationId=" + parsed.OperationID}
+		if parsed.ApprovalToken != "" {
+			out = append(out, "approvalToken="+parsed.ApprovalToken)
 		}
-		return []string{"__operation__", "addon_install_commit", "operationId=" + parsed.OperationID, "approvalToken=" + parsed.ApprovalToken}, nil
+		return out, nil
 	}
 }
 
@@ -284,10 +296,11 @@ func envUpCommitArgs() func(json.RawMessage) ([]string, error) {
 		if parsed.OperationID == "" {
 			return nil, fmt.Errorf("operationId is required")
 		}
-		if parsed.ApprovalToken == "" {
-			return nil, fmt.Errorf("approvalToken is required")
+		out := []string{"__operation__", "env_up_commit", "operationId=" + parsed.OperationID}
+		if parsed.ApprovalToken != "" {
+			out = append(out, "approvalToken="+parsed.ApprovalToken)
 		}
-		return []string{"__operation__", "env_up_commit", "operationId=" + parsed.OperationID, "approvalToken=" + parsed.ApprovalToken}, nil
+		return out, nil
 	}
 }
 
@@ -320,10 +333,11 @@ func destructiveCommitArgs(action string) func(json.RawMessage) ([]string, error
 		if parsed.OperationID == "" {
 			return nil, fmt.Errorf("operationId is required")
 		}
-		if parsed.ApprovalToken == "" {
-			return nil, fmt.Errorf("approvalToken is required")
+		out := []string{"__operation__", action, "operationId=" + parsed.OperationID}
+		if parsed.ApprovalToken != "" {
+			out = append(out, "approvalToken="+parsed.ApprovalToken)
 		}
-		return []string{"__operation__", action, "operationId=" + parsed.OperationID, "approvalToken=" + parsed.ApprovalToken}, nil
+		return out, nil
 	}
 }
 
@@ -337,6 +351,19 @@ func operationArgs(action string) func(json.RawMessage) ([]string, error) {
 			return nil, fmt.Errorf("operationId is required")
 		}
 		return []string{"__operation__", action, "operationId=" + parsed.OperationID}, nil
+	}
+}
+
+func operationUnlockArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed operationUnlockArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.Env == "" {
+			return nil, fmt.Errorf("env is required")
+		}
+		return []string{"__operation__", "unlock_stale", "env=" + parsed.Env}, nil
 	}
 }
 
@@ -636,7 +663,7 @@ func addonCommitSchema() map[string]any {
 			"operationId":   map[string]any{"type": "string"},
 			"approvalToken": map[string]any{"type": "string"},
 		},
-		"required":             []string{"operationId", "approvalToken"},
+		"required":             []string{"operationId"},
 		"additionalProperties": false,
 	}
 }
@@ -648,6 +675,17 @@ func operationSchema() map[string]any {
 			"operationId": map[string]any{"type": "string"},
 		},
 		"required":             []string{"operationId"},
+		"additionalProperties": false,
+	}
+}
+
+func operationUnlockSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"env": map[string]any{"type": "string"},
+		},
+		"required":             []string{"env"},
 		"additionalProperties": false,
 	}
 }

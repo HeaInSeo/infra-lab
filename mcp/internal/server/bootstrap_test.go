@@ -17,11 +17,21 @@ func TestValidateEnvelopeRejectsWrongCommand(t *testing.T) {
 }
 
 func TestReadOnlyToolsFilteredByCapability(t *testing.T) {
-	tools := readOnlyTools(map[string]bool{
-		"version.v1":      true,
-		"capabilities.v1": true,
+	tools := readOnlyTools(bootstrapInfo{
+		InfraLabVersion: "dev",
+		ContractVersion: supportedContractVersion,
+		Capabilities: map[string]bool{
+			"version.v1":      true,
+			"capabilities.v1": true,
+		},
 	})
 
+	if _, ok := tools["infra_lab.setup_check"]; !ok {
+		t.Fatal("expected infra_lab.setup_check")
+	}
+	if _, ok := tools["infra_lab.what_can_i_do"]; !ok {
+		t.Fatal("expected infra_lab.what_can_i_do")
+	}
 	if _, ok := tools["infra_lab.version"]; !ok {
 		t.Fatal("expected infra_lab.version")
 	}

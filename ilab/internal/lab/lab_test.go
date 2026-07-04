@@ -240,6 +240,67 @@ func TestLoadEnv_MissingMeta(t *testing.T) {
 	}
 }
 
+// ── TerraformResourceCount ───────────────────────────────────────────────
+
+func TestTerraformResourceCount_MissingFile(t *testing.T) {
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "no-state-file", "libvirt", "flannel", "lab")
+	env, err := LoadEnv(tmp, "no-state-file")
+	must(t, err)
+
+	count, err := env.TerraformResourceCount()
+	if err != nil {
+		t.Fatalf("TerraformResourceCount() error = %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for missing state file", count)
+	}
+}
+
+func TestTerraformResourceCount_EmptyResources(t *testing.T) {
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "stale-env", "libvirt", "flannel", "lab")
+	env, err := LoadEnv(tmp, "stale-env")
+	must(t, err)
+	must(t, os.WriteFile(env.StateFile, []byte(`{"version":4,"resources":[],"outputs":{}}`), 0644))
+
+	count, err := env.TerraformResourceCount()
+	if err != nil {
+		t.Fatalf("TerraformResourceCount() error = %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for empty resources array", count)
+	}
+}
+
+func TestTerraformResourceCount_HasResources(t *testing.T) {
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "live-env", "libvirt", "flannel", "lab")
+	env, err := LoadEnv(tmp, "live-env")
+	must(t, err)
+	must(t, os.WriteFile(env.StateFile, []byte(`{"version":4,"resources":[{"type":"libvirt_domain"},{"type":"libvirt_volume"}],"outputs":{}}`), 0644))
+
+	count, err := env.TerraformResourceCount()
+	if err != nil {
+		t.Fatalf("TerraformResourceCount() error = %v", err)
+	}
+	if count != 2 {
+		t.Errorf("count = %d, want 2", count)
+	}
+}
+
+func TestTerraformResourceCount_InvalidJSON(t *testing.T) {
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "broken-state", "libvirt", "flannel", "lab")
+	env, err := LoadEnv(tmp, "broken-state")
+	must(t, err)
+	must(t, os.WriteFile(env.StateFile, []byte("not json"), 0644))
+
+	if _, err := env.TerraformResourceCount(); err == nil {
+		t.Error("TerraformResourceCount() expected error for invalid JSON, got nil")
+	}
+}
+
 // ── ListEnvs ──────────────────────────────────────────────────────────────
 
 func TestListEnvs_NoStateDir(t *testing.T) {
@@ -361,6 +422,76 @@ func TestFindEnvForVM_PrefixMustMatch(t *testing.T) {
 	}
 }
 
+func writeState(t *testing.T, env *Env, resourceCount int) {
+	t.Helper()
+	resources := make([]string, resourceCount)
+	for i := range resources {
+		resources[i] = `{"type":"libvirt_domain"}`
+	}
+	body := fmt.Sprintf(`{"version":4,"resources":[%s],"outputs":{}}`, strings.Join(resources, ","))
+	must(t, os.WriteFile(env.StateFile, []byte(body), 0644))
+}
+
+func TestFindEnvForVM_DuplicatePrefix_OneLive(t *testing.T) {
+	// Two envs share name_prefix "lab"; only one has live terraform resources.
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "stale-env", "libvirt", "flannel", "lab")
+	makeEnv(t, tmp, "live-env", "libvirt", "cilium", "lab")
+
+	staleEnv, err := LoadEnv(tmp, "stale-env")
+	must(t, err)
+	writeState(t, staleEnv, 0)
+
+	liveEnv, err := LoadEnv(tmp, "live-env")
+	must(t, err)
+	writeState(t, liveEnv, 3)
+
+	env, err := FindEnvForVM(tmp, "lab-master-0")
+	if err != nil {
+		t.Fatalf("FindEnvForVM() error = %v", err)
+	}
+	if env.Name != "live-env" {
+		t.Errorf("env.Name = %q, want live-env (the one with live terraform state)", env.Name)
+	}
+}
+
+func TestFindEnvForVM_DuplicatePrefix_NoneLive(t *testing.T) {
+	// Two envs share name_prefix "lab"; neither has live terraform resources.
+	// No real infra is at stake, so this must not error — just pick one.
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "env-a", "libvirt", "flannel", "lab")
+	makeEnv(t, tmp, "env-b", "libvirt", "cilium", "lab")
+
+	env, err := FindEnvForVM(tmp, "lab-master-0")
+	if err != nil {
+		t.Fatalf("FindEnvForVM() error = %v, want no error when no matching env is live", err)
+	}
+	if env.Name != "env-a" && env.Name != "env-b" {
+		t.Errorf("env.Name = %q, want env-a or env-b", env.Name)
+	}
+}
+
+func TestFindEnvForVM_DuplicatePrefix_BothLive(t *testing.T) {
+	// Two envs share name_prefix "lab" and both genuinely have live
+	// terraform resources — this is real, unresolvable ambiguity.
+	tmp := t.TempDir()
+	makeEnv(t, tmp, "env-a", "libvirt", "flannel", "lab")
+	makeEnv(t, tmp, "env-b", "libvirt", "cilium", "lab")
+
+	envA, err := LoadEnv(tmp, "env-a")
+	must(t, err)
+	writeState(t, envA, 2)
+
+	envB, err := LoadEnv(tmp, "env-b")
+	must(t, err)
+	writeState(t, envB, 5)
+
+	_, err = FindEnvForVM(tmp, "lab-master-0")
+	if err == nil {
+		t.Fatal("FindEnvForVM() expected error for genuine ambiguity, got nil")
+	}
+}
+
 // ── BuildInfo.Print ───────────────────────────────────────────────────────
 
 func TestBuildInfoPrint(t *testing.T) {
@@ -420,4 +551,63 @@ func TestListAllVMs_ManagedAnnotation(t *testing.T) {
 			t.Errorf("VM %q: Managed=%v, want %v", vm.Name, vm.Managed, wantManaged)
 		}
 	}
+}
+
+// ── OSInfo / parseOSRelease ──────────────────────────────────────────────
+
+func TestParseOSRelease_Ubuntu(t *testing.T) {
+	data := []byte(`PRETTY_NAME="Ubuntu 24.04.1 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.1 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+`)
+	info := parseOSRelease(data)
+	checks := []struct{ got, want, field string }{
+		{info.ID, "ubuntu", "ID"},
+		{info.PrettyName, "Ubuntu 24.04.1 LTS", "PrettyName"},
+		{info.VersionID, "24.04", "VersionID"},
+		{info.VersionCodename, "noble", "VersionCodename"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("parseOSRelease().%s = %q, want %q", c.field, c.got, c.want)
+		}
+	}
+}
+
+func TestParseOSRelease_Empty(t *testing.T) {
+	info := parseOSRelease([]byte(""))
+	if info != (OSInfo{}) {
+		t.Errorf("parseOSRelease(empty) = %+v, want zero value", info)
+	}
+}
+
+func TestParseOSRelease_UnquotedValues(t *testing.T) {
+	data := []byte("ID=rocky\nVERSION_ID=9.4\n")
+	info := parseOSRelease(data)
+	if info.ID != "rocky" || info.VersionID != "9.4" {
+		t.Errorf("parseOSRelease() = %+v, want ID=rocky VERSION_ID=9.4", info)
+	}
+}
+
+func TestOSInfoPrint(t *testing.T) {
+	o := &OSInfo{ID: "ubuntu", PrettyName: "Ubuntu 24.04.1 LTS", VersionID: "24.04", VersionCodename: "noble"}
+	var buf bytes.Buffer
+	o.Print(&buf)
+	out := buf.String()
+	for _, want := range []string{"ubuntu", "Ubuntu 24.04.1 LTS", "24.04", "noble"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Print() output missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
+func TestOSInfoPrint_Empty(t *testing.T) {
+	// Should not panic on zero-value struct.
+	var o OSInfo
+	var buf bytes.Buffer
+	o.Print(&buf)
 }

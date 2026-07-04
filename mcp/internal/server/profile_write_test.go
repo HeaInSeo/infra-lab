@@ -73,7 +73,11 @@ func TestAppendAuditWritesJSONL(t *testing.T) {
 }
 
 func TestProfileWriteToolsRegisteredWithValidateCapability(t *testing.T) {
-	handlers := readOnlyTools(map[string]bool{"profile.validate.v1": true})
+	handlers := readOnlyTools(bootstrapInfo{
+		InfraLabVersion: "dev",
+		ContractVersion: supportedContractVersion,
+		Capabilities:    map[string]bool{"profile.validate.v1": true},
+	})
 	for _, name := range []string{
 		"infra_lab.profile_clone",
 		"infra_lab.profile_save_as",

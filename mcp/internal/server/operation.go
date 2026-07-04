@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -83,6 +84,22 @@ type operationLogsData struct {
 	Stderr      string `json:"stderr"`
 }
 
+type operationLockRecord struct {
+	OperationID string `json:"operationId"`
+	Env         string `json:"env"`
+	Tool        string `json:"tool"`
+	StartedAt   string `json:"startedAt"`
+	ExpiresAt   string `json:"expiresAt"`
+	PID         int    `json:"pid,omitempty"`
+	Hostname    string `json:"hostname,omitempty"`
+	Stale       bool   `json:"stale"`
+	Path        string `json:"path"`
+}
+
+type operationLocksData struct {
+	Locks []operationLockRecord `json:"locks"`
+}
+
 type profileValidationEnvelope struct {
 	OK   bool `json:"ok"`
 	Data struct {
@@ -119,6 +136,14 @@ func handleOperation(args []string, timeout time.Duration) (string, error) {
 		return operationStatus(fields["operationId"])
 	case "logs":
 		return operationLogs(fields["operationId"])
+	case "approve":
+		return operationApprove(fields["operationId"])
+	case "cancel":
+		return operationCancel(fields["operationId"])
+	case "locks":
+		return operationLocks()
+	case "unlock_stale":
+		return operationUnlockStale(fields["env"])
 	default:
 		return "", fmt.Errorf("unsupported operation action: %s", action)
 	}
@@ -582,8 +607,8 @@ func verifyPreparedOperation(fields map[string]string, tool string) (operationRe
 	if op.Tool != tool {
 		return op, fmt.Errorf("operation tool mismatch: %s", op.Tool)
 	}
-	if op.Status != "PREPARED" {
-		return op, fmt.Errorf("operation status must be PREPARED, got %s", op.Status)
+	if op.Status != "PREPARED" && op.Status != "APPROVED" {
+		return op, fmt.Errorf("operation status must be PREPARED or APPROVED, got %s", op.Status)
 	}
 	expiresAt, err := time.Parse(time.RFC3339, op.ExpiresAt)
 	if err != nil {
@@ -594,9 +619,15 @@ func verifyPreparedOperation(fields map[string]string, tool string) (operationRe
 		_, _ = writeOperation(op)
 		return op, fmt.Errorf("APPROVAL_TOKEN_EXPIRED: operation expired")
 	}
+	if op.Status == "APPROVED" && op.Approval.Status == "approved" && token == "" {
+		return op, nil
+	}
 	expected, err := approvalToken(op)
 	if err != nil {
 		return op, err
+	}
+	if token == "" {
+		return op, fmt.Errorf("APPROVAL_REQUIRED")
 	}
 	if !hmac.Equal([]byte(expected), []byte(token)) {
 		return op, fmt.Errorf("APPROVAL_TOKEN_INVALID")
@@ -672,13 +703,20 @@ func runDestructiveCommand(op operationRecord, timeout time.Duration) error {
 	case "env_down":
 		return runLoggedCommand(op, timeout, filepath.Join(root, "bin", "ilab"), "env", "down", op.Target.Env)
 	case "env_clean":
-		return runLoggedCommandWithEnv(op, timeout, map[string]string{"FORCE": "1"}, "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "clean")
+		return runLoggedCommandWithEnv(op, timeout, cleanEnvVars(op.Target.Env), "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "clean")
 	case "env_rebuild":
 		return runLoggedCommand(op, timeout, filepath.Join(root, "bin", "ilab"), "env", "rebuild", op.Target.Profile, "--approve")
 	case "addon_uninstall":
-		return runLoggedCommand(op, timeout, "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "addons-uninstall", "optional", op.Target.Addon)
+		return runLoggedCommand(op, timeout, "bash", filepath.Join(root, "scripts", "k8s-tool.sh"), "addons-uninstall", addonScope(op.Target.Addon), op.Target.Addon)
 	default:
 		return fmt.Errorf("unsupported destructive tool: %s", op.Tool)
+	}
+}
+
+func cleanEnvVars(env string) map[string]string {
+	return map[string]string{
+		"FORCE":    "1",
+		"ENV_NAME": env,
 	}
 }
 
@@ -687,15 +725,23 @@ func runAddonCommand(op operationRecord, timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
+	scope := addonScope(op.Target.Addon)
 	for _, args := range [][]string{
-		{"addons-install", "optional", op.Target.Addon},
-		{"addons-verify", "optional", op.Target.Addon},
+		{"addons-install", scope, op.Target.Addon},
+		{"addons-verify", scope, op.Target.Addon},
 	} {
 		if err := runLoggedCommand(op, timeout, "bash", append([]string{filepath.Join(root, "scripts", "k8s-tool.sh")}, args...)...); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func addonScope(addon string) string {
+	if addon == "metrics-server" {
+		return "base"
+	}
+	return "optional"
 }
 
 func runLoggedCommand(op operationRecord, timeout time.Duration, command string, args ...string) error {
@@ -762,6 +808,143 @@ func operationLogs(operationID string) (string, error) {
 		Stdout:      string(stdout),
 		Stderr:      string(stderr),
 	})
+}
+
+func operationApprove(operationID string) (string, error) {
+	op, err := readOperation(operationID)
+	if err != nil {
+		return "", err
+	}
+	if op.Status != "PREPARED" {
+		return "", fmt.Errorf("operation status must be PREPARED, got %s", op.Status)
+	}
+	if op.Approval.Required {
+		op.Approval.Status = "approved"
+	}
+	op.Status = "APPROVED"
+	if _, err := writeOperation(op); err != nil {
+		return "", err
+	}
+	if _, err := appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        "operation_approve",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      auditTarget(op),
+		Result:      "ok",
+	}); err != nil {
+		return "", fmt.Errorf("AUDIT_WRITE_FAILED: %w", err)
+	}
+	return encodeOperationEnvelope("operation.approve", op)
+}
+
+func operationCancel(operationID string) (string, error) {
+	op, err := readOperation(operationID)
+	if err != nil {
+		return "", err
+	}
+	switch op.Status {
+	case "PREPARED", "APPROVED":
+	default:
+		return "", fmt.Errorf("operation status must be PREPARED or APPROVED, got %s", op.Status)
+	}
+	op.Status = "CANCELLED"
+	op.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	if op.Approval.Status == "required" || op.Approval.Status == "approved" {
+		op.Approval.Status = "rejected"
+	}
+	if _, err := writeOperation(op); err != nil {
+		return "", err
+	}
+	if _, err := appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        "operation_cancel",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      auditTarget(op),
+		Result:      "ok",
+	}); err != nil {
+		return "", fmt.Errorf("AUDIT_WRITE_FAILED: %w", err)
+	}
+	return encodeOperationEnvelope("operation.cancel", op)
+}
+
+func operationLocks() (string, error) {
+	dir, err := lockDir()
+	if err != nil {
+		return "", err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return encodeOperationEnvelope("operation.locks", operationLocksData{Locks: []operationLockRecord{}})
+		}
+		return "", err
+	}
+	locks := []operationLockRecord{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".lock") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		lock, err := readLock(path)
+		if err != nil {
+			continue
+		}
+		locks = append(locks, lock)
+	}
+	sort.Slice(locks, func(i, j int) bool {
+		return locks[i].Env < locks[j].Env
+	})
+	return encodeOperationEnvelope("operation.locks", operationLocksData{Locks: locks})
+}
+
+func operationUnlockStale(env string) (string, error) {
+	if env == "" {
+		return "", fmt.Errorf("env is required")
+	}
+	if err := validateTokenPart(env); err != nil {
+		return "", err
+	}
+	dir, err := lockDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, env+".lock")
+	lock, err := readLock(path)
+	if err != nil {
+		return "", err
+	}
+	if !lock.Stale {
+		return "", fmt.Errorf("LOCK_NOT_STALE: %s", env)
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	data := map[string]any{
+		"env":     env,
+		"removed": true,
+		"lock":    lock,
+	}
+	return encodeOperationEnvelope("operation.unlock_stale", data)
+}
+
+func readLock(path string) (operationLockRecord, error) {
+	var lock operationLockRecord
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return lock, err
+	}
+	if err := json.Unmarshal(data, &lock); err != nil {
+		return lock, err
+	}
+	lock.Path = path
+	if expiresAt, err := time.Parse(time.RFC3339, lock.ExpiresAt); err == nil {
+		lock.Stale = time.Now().UTC().After(expiresAt)
+	}
+	return lock, nil
 }
 
 func writeOperation(op operationRecord) (string, error) {
@@ -867,6 +1050,9 @@ func acquireEnvLock(op operationRecord) (func(), error) {
 }
 
 func lockDir() (string, error) {
+	if dir := os.Getenv("INFRA_LAB_LOCK_DIR"); dir != "" {
+		return dir, nil
+	}
 	root, err := infraLabRoot()
 	if err != nil {
 		return "", err

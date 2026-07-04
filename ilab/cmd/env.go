@@ -127,10 +127,14 @@ func runEnvList(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ENV\tBACKEND\tCNI\tCREATED\tCOMMIT")
+	fmt.Fprintln(w, "ENV\tBACKEND\tCNI\tCREATED\tCOMMIT\tSTALE")
 	for _, e := range envs {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			e.Name, e.Backend, e.CNI, e.CreatedAt, shortHash(e.GitCommit))
+		stale := ""
+		if count, err := e.TerraformResourceCount(); err == nil && count == 0 {
+			stale = "yes"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			e.Name, e.Backend, e.CNI, e.CreatedAt, shortHash(e.GitCommit), stale)
 	}
 	return w.Flush()
 }
