@@ -13,6 +13,8 @@ hosts/*.env
 envs/*.env
 envs/*.yaml
 *.auto.tfvars
+terraform.tfvars
+tofu.tfvars
 .codex
 bin/
 ilab/ilab

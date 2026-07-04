@@ -44,6 +44,22 @@ type toolFlow struct {
 	Steps       []string `json:"steps"`
 }
 
+type toolCatalogData struct {
+	Tools []toolCatalogEntry `json:"tools"`
+}
+
+type toolCatalogEntry struct {
+	Name                 string   `json:"name"`
+	Description          string   `json:"description"`
+	Category             string   `json:"category"`
+	Risk                 string   `json:"risk"`
+	Destructive          bool     `json:"destructive"`
+	RequiresApproval     bool     `json:"requiresApproval"`
+	Source               string   `json:"source"`
+	Stage                string   `json:"stage"`
+	RequiredCapabilities []string `json:"requiredCapabilities"`
+}
+
 type whatCanIDoEnvelope struct {
 	OK              bool             `json:"ok"`
 	Command         string           `json:"command"`
@@ -66,8 +82,39 @@ func addWhatCanIDoTool(handlers map[string]toolHandler) {
 			Description: "Explain the current infra-lab MCP capabilities, categorized tools, safe execution flows, and recommended prompts.",
 			InputSchema: emptySchema(),
 		},
+		metadata: toolMetadata{
+			RequiredCapabilities: []string{"version.v1", "capabilities.v1"},
+			Category:             "read_only",
+			Risk:                 "LOW",
+			Source:               "mcp-internal",
+			Stage:                "Stage 1",
+		},
 		call: func(_ json.RawMessage) (toolResult, error) {
 			raw, err := whatCanIDoJSON(handlers)
+			if err != nil {
+				return toolResult{}, err
+			}
+			return toolResult{Content: []toolContent{{Type: "text", Text: raw}}}, nil
+		},
+	}
+}
+
+func addToolCatalog(handlers map[string]toolHandler) {
+	handlers["infra_lab.tool_catalog"] = toolHandler{
+		tool: tool{
+			Name:        "infra_lab.tool_catalog",
+			Description: "List currently registered infra-lab MCP tools with their capability gates and risk metadata.",
+			InputSchema: emptySchema(),
+		},
+		metadata: toolMetadata{
+			RequiredCapabilities: []string{"version.v1", "capabilities.v1"},
+			Category:             "introspection",
+			Risk:                 "LOW",
+			Source:               "mcp-internal",
+			Stage:                "Stage 1",
+		},
+		call: func(_ json.RawMessage) (toolResult, error) {
+			raw, err := encodeSuccessEnvelope("mcp.tool_catalog", buildToolCatalog(handlers))
 			if err != nil {
 				return toolResult{}, err
 			}
@@ -80,9 +127,7 @@ func handlersForCatalog(info bootstrapInfo, handlers map[string]toolHandler) map
 	if handlers != nil {
 		return handlers
 	}
-	generated := readOnlyTools(info)
-	addWhatCanIDoTool(generated)
-	return generated
+	return readOnlyTools(info)
 }
 
 func whatCanIDoJSON(handlers map[string]toolHandler) (string, error) {
@@ -130,12 +175,12 @@ func toolCatalogFromHandlers(handlers map[string]toolHandler) toolCatalog {
 	for i := range categories {
 		index[categories[i].Name] = i
 	}
-	for name := range handlers {
-		item := classifyTool(name)
+	for _, handler := range handlers {
+		item := classifyTool(handler)
 		if item.Name == "" {
 			continue
 		}
-		cat, ok := index[toolCategoryName(name)]
+		cat, ok := index[summaryCategoryName(handler.metadata.Category)]
 		if !ok {
 			continue
 		}
@@ -201,46 +246,69 @@ func toolCatalogFromHandlers(handlers map[string]toolHandler) toolCatalog {
 	}
 }
 
-func toolCategoryName(name string) string {
-	switch name {
-	case "infra_lab.version", "infra_lab.capabilities", "infra_lab.doctor", "infra_lab.env_list", "infra_lab.env_status", "infra_lab.k8s_status", "infra_lab.vm_list", "infra_lab.vm_list_all", "infra_lab.vm_version", "infra_lab.profile_list", "infra_lab.profile_show", "infra_lab.profile_validate", "infra_lab.setup_check", "infra_lab.what_can_i_do":
+func buildToolCatalog(handlers map[string]toolHandler) toolCatalogData {
+	entries := make([]toolCatalogEntry, 0, len(handlers))
+	for _, handler := range handlers {
+		required := append([]string(nil), handler.metadata.RequiredCapabilities...)
+		sort.Strings(required)
+		entries = append(entries, toolCatalogEntry{
+			Name:                 handler.tool.Name,
+			Description:          handler.tool.Description,
+			Category:             handler.metadata.Category,
+			Risk:                 handler.metadata.Risk,
+			Destructive:          handler.metadata.Destructive,
+			RequiresApproval:     handler.metadata.RequiresApproval,
+			Source:               handler.metadata.Source,
+			Stage:                handler.metadata.Stage,
+			RequiredCapabilities: required,
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name < entries[j].Name
+	})
+	return toolCatalogData{Tools: entries}
+}
+
+func summaryCategoryName(category string) string {
+	switch category {
+	case "read_only", "introspection":
 		return "readOnly"
-	case "infra_lab.collect_snapshot", "infra_lab.summarize_health":
+	case "evidence":
 		return "evidence"
-	case "infra_lab.up_plan", "infra_lab.down_plan", "infra_lab.rebuild_plan", "infra_lab.addon_install_plan", "infra_lab.addon_uninstall_plan":
+	case "plan":
 		return "planOnly"
-	case "infra_lab.profile_clone", "infra_lab.profile_save_as", "infra_lab.profile_validate_and_save":
+	case "profile_write":
 		return "profileWrite"
-	case "infra_lab.addon_install_prepare", "infra_lab.addon_install_commit", "infra_lab.env_up_prepare", "infra_lab.env_up_commit":
+	case "approved_mutation", "approved_env_up":
 		return "approvedMutation"
-	case "infra_lab.env_down_prepare", "infra_lab.env_down_commit", "infra_lab.env_clean_prepare", "infra_lab.env_clean_commit", "infra_lab.env_rebuild_prepare", "infra_lab.env_rebuild_commit", "infra_lab.addon_uninstall_prepare", "infra_lab.addon_uninstall_commit":
+	case "destructive_execution":
 		return "destructive"
-	case "infra_lab.operation_approve", "infra_lab.operation_cancel", "infra_lab.operation_status", "infra_lab.operation_logs", "infra_lab.operation_locks", "infra_lab.operation_unlock_stale":
+	case "operation":
 		return "operation"
 	default:
 		return ""
 	}
 }
 
-func classifyTool(name string) toolCatalogItem {
-	category := toolCategoryName(name)
+func classifyTool(handler toolHandler) toolCatalogItem {
+	category := summaryCategoryName(handler.metadata.Category)
 	if category == "" {
 		return toolCatalogItem{}
 	}
-	item := toolCatalogItem{
-		Name:             name,
-		Purpose:          toolPurpose(name),
-		Mutates:          category == "profileWrite" || category == "approvedMutation" || category == "destructive" || name == "infra_lab.operation_approve" || name == "infra_lab.operation_cancel" || name == "infra_lab.operation_unlock_stale",
-		Destructive:      category == "destructive",
-		RequiresApproval: category == "approvedMutation" || category == "destructive",
+	return toolCatalogItem{
+		Name:             handler.tool.Name,
+		Purpose:          toolPurpose(handler.tool.Name),
+		Mutates:          category == "profileWrite" || category == "approvedMutation" || category == "destructive" || handler.tool.Name == "infra_lab.operation_approve" || handler.tool.Name == "infra_lab.operation_cancel" || handler.tool.Name == "infra_lab.operation_unlock_stale",
+		Destructive:      handler.metadata.Destructive,
+		RequiresApproval: handler.metadata.RequiresApproval,
 	}
-	return item
 }
 
 func toolPurpose(name string) string {
 	purposes := map[string]string{
 		"infra_lab.setup_check":               "MCP readiness와 client 등록 가이드를 확인한다.",
 		"infra_lab.what_can_i_do":             "현재 MCP로 가능한 작업을 카테고리별로 설명한다.",
+		"infra_lab.tool_catalog":              "현재 등록된 MCP tool의 capability gate와 risk metadata를 조회한다.",
 		"infra_lab.version":                   "infra-lab 버전 정보를 조회한다.",
 		"infra_lab.capabilities":              "ilab JSON capability 목록을 조회한다.",
 		"infra_lab.doctor":                    "host prerequisite와 local state를 진단한다.",

@@ -11,8 +11,19 @@ import (
 )
 
 type toolHandler struct {
-	tool tool
-	call func(json.RawMessage) (toolResult, error)
+	tool     tool
+	metadata toolMetadata
+	call     func(json.RawMessage) (toolResult, error)
+}
+
+type toolMetadata struct {
+	RequiredCapabilities []string `json:"requiredCapabilities"`
+	Category             string   `json:"category"`
+	Risk                 string   `json:"risk"`
+	Destructive          bool     `json:"destructive"`
+	RequiresApproval     bool     `json:"requiresApproval"`
+	Source               string   `json:"source"`
+	Stage                string   `json:"stage"`
 }
 
 type envArg struct {
@@ -80,15 +91,17 @@ func readOnlyTools(info bootstrapInfo) map[string]toolHandler {
 		if !capabilities[capability] {
 			return
 		}
-		addTool(handlers, name, description, schema, ilabArgs, timeout)
+		addTool(handlers, name, description, schema, directToolMeta(capability, "read_only", "LOW", "Stage 1"), ilabArgs, timeout)
 	}
-	addSynthetic := func(required []string, name, description string, schema map[string]any, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
+	addSynthetic := func(required []string, name, description string, schema map[string]any, meta toolMetadata, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
 		for _, capability := range required {
 			if !capabilities[capability] {
 				return
 			}
 		}
-		addTool(handlers, name, description, schema, ilabArgs, timeout)
+		meta.RequiredCapabilities = append([]string(nil), required...)
+		meta.Source = "mcp-synthetic"
+		addTool(handlers, name, description, schema, meta, ilabArgs, timeout)
 	}
 
 	addSetupCheckTool(handlers, info)
@@ -105,45 +118,71 @@ func readOnlyTools(info bootstrapInfo) map[string]toolHandler {
 	add("profile.list.v1", "infra_lab.profile_list", "List available profiles.", emptySchema(), noArgs("profile", "list"), 30*time.Second)
 	add("profile.show.v1", "infra_lab.profile_show", "Show normalized profile data.", profileSchema(), profileArgs("profile", "show"), 30*time.Second)
 	add("profile.validate.v1", "infra_lab.profile_validate", "Validate a profile.", profileSchema(), profileArgs("profile", "validate"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1", "vm.list.v1", "k8s.status.v1"}, "infra_lab.collect_snapshot", "Collect a read-only infra-lab health snapshot.", envSchema(), snapshotArgs(), 90*time.Second)
-	addSynthetic([]string{"env.status.v1", "vm.list.v1", "k8s.status.v1"}, "infra_lab.summarize_health", "Summarize read-only infra-lab snapshot health.", envSchema(), healthSummaryArgs(), 90*time.Second)
-	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.up_plan", "Create a plan-only env up proposal.", planSchema(false), planArgs("env_up"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.down_plan", "Create a plan-only env down proposal.", planSchema(false), planArgs("env_down"), 30*time.Second)
-	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.rebuild_plan", "Create a plan-only env rebuild proposal.", planSchema(false), planArgs("rebuild"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_plan", "Create a plan-only addon install proposal.", planSchema(true), planArgs("addon_install"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_uninstall_plan", "Create a plan-only addon uninstall proposal.", planSchema(true), planArgs("addon_uninstall"), 30*time.Second)
-	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_clone", "Clone a profile into the user profile directory without overwriting existing files.", profileWriteSchema(true), profileWriteArgs("clone"), 30*time.Second)
-	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_save_as", "Create a new profile in the user profile directory without touching infrastructure.", profileWriteSchema(false), profileWriteArgs("save_as"), 30*time.Second)
-	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_validate_and_save", "Validate and save a new profile in the user profile directory.", profileWriteSchema(false), profileWriteArgs("validate_and_save"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_prepare", "Prepare an approved addon install operation.", addonPrepareSchema(), addonPrepareArgs(), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_commit", "Commit a prepared addon install operation after approval.", addonCommitSchema(), addonCommitArgs(), 15*time.Minute)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_status", "Read an infra-lab operation status record.", operationSchema(), operationArgs("status"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_logs", "Read stdout/stderr logs for an infra-lab operation.", operationSchema(), operationArgs("logs"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_approve", "Approve a prepared infra-lab operation before commit.", operationSchema(), operationArgs("approve"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_cancel", "Cancel a prepared or approved infra-lab operation before it runs.", operationSchema(), operationArgs("cancel"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_locks", "List current infra-lab env locks.", emptySchema(), noArgs("__operation__", "locks"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_unlock_stale", "Remove an expired env lock only when it is stale.", operationUnlockSchema(), operationUnlockArgs(), 30*time.Second)
-	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_prepare", "Prepare an approved new environment creation operation.", envUpPrepareSchema(), envUpPrepareArgs(), 30*time.Second)
-	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_commit", "Commit a prepared new environment creation operation after approval.", addonCommitSchema(), envUpCommitArgs(), 30*time.Minute)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_down_prepare", "Prepare an approved destructive env down operation.", destructivePrepareSchema(false, false), destructivePrepareArgs("env_down_prepare"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_down_commit", "Commit a prepared env down operation after approval.", addonCommitSchema(), destructiveCommitArgs("env_down_commit"), 30*time.Minute)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_clean_prepare", "Prepare an approved destructive env clean operation.", destructivePrepareSchema(false, false), destructivePrepareArgs("env_clean_prepare"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_clean_commit", "Commit a prepared env clean operation after approval.", addonCommitSchema(), destructiveCommitArgs("env_clean_commit"), 10*time.Minute)
-	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_rebuild_prepare", "Prepare an approved destructive env rebuild operation.", destructivePrepareSchema(true, false), destructivePrepareArgs("env_rebuild_prepare"), 30*time.Second)
-	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_rebuild_commit", "Commit a prepared env rebuild operation after approval.", addonCommitSchema(), destructiveCommitArgs("env_rebuild_commit"), 45*time.Minute)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_uninstall_prepare", "Prepare an approved destructive addon uninstall operation.", destructivePrepareSchema(false, true), destructivePrepareArgs("addon_uninstall_prepare"), 30*time.Second)
-	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_uninstall_commit", "Commit a prepared addon uninstall operation after approval.", addonCommitSchema(), destructiveCommitArgs("addon_uninstall_commit"), 15*time.Minute)
+	addSynthetic([]string{"env.status.v1", "vm.list.v1", "k8s.status.v1"}, "infra_lab.collect_snapshot", "Collect a read-only infra-lab health snapshot.", envSchema(), syntheticToolMeta("evidence", "LOW", false, false, "Stage 2"), snapshotArgs(), 90*time.Second)
+	addSynthetic([]string{"env.status.v1", "vm.list.v1", "k8s.status.v1"}, "infra_lab.summarize_health", "Summarize read-only infra-lab snapshot health.", envSchema(), syntheticToolMeta("evidence", "LOW", false, false, "Stage 2"), healthSummaryArgs(), 90*time.Second)
+	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.up_plan", "Create a plan-only env up proposal.", planSchema(false), syntheticToolMeta("plan", "MEDIUM", false, true, "Stage 3"), planArgs("env_up"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.down_plan", "Create a plan-only env down proposal.", planSchema(false), syntheticToolMeta("plan", "HIGH", true, true, "Stage 3"), planArgs("env_down"), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.rebuild_plan", "Create a plan-only env rebuild proposal.", planSchema(false), syntheticToolMeta("plan", "HIGH", true, true, "Stage 3"), planArgs("rebuild"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_plan", "Create a plan-only addon install proposal.", planSchema(true), syntheticToolMeta("plan", "MEDIUM", false, true, "Stage 3"), planArgs("addon_install"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_uninstall_plan", "Create a plan-only addon uninstall proposal.", planSchema(true), syntheticToolMeta("plan", "HIGH", true, true, "Stage 3"), planArgs("addon_uninstall"), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_clone", "Clone a profile into the user profile directory without overwriting existing files.", profileWriteSchema(true), syntheticToolMeta("profile_write", "MEDIUM", false, false, "Stage 4"), profileWriteArgs("clone"), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_save_as", "Create a new profile in the user profile directory without touching infrastructure.", profileWriteSchema(false), syntheticToolMeta("profile_write", "MEDIUM", false, false, "Stage 4"), profileWriteArgs("save_as"), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1"}, "infra_lab.profile_validate_and_save", "Validate and save a new profile in the user profile directory.", profileWriteSchema(false), syntheticToolMeta("profile_write", "MEDIUM", false, false, "Stage 4"), profileWriteArgs("validate_and_save"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_prepare", "Prepare an approved addon install operation.", addonPrepareSchema(), syntheticToolMeta("approved_mutation", "MEDIUM", false, true, "Stage 5"), addonPrepareArgs(), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_install_commit", "Commit a prepared addon install operation after approval.", addonCommitSchema(), syntheticToolMeta("approved_mutation", "MEDIUM", false, true, "Stage 5"), addonCommitArgs(), 15*time.Minute)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_status", "Read an infra-lab operation status record.", operationSchema(), syntheticToolMeta("operation", "LOW", false, false, "Stage 5"), operationArgs("status"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_logs", "Read stdout/stderr logs for an infra-lab operation.", operationSchema(), syntheticToolMeta("operation", "LOW", false, false, "Stage 5"), operationArgs("logs"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_approve", "Approve a prepared infra-lab operation before commit.", operationSchema(), syntheticToolMeta("operation", "MEDIUM", false, false, "Stage 5"), operationArgs("approve"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_cancel", "Cancel a prepared or approved infra-lab operation before it runs.", operationSchema(), syntheticToolMeta("operation", "MEDIUM", false, false, "Stage 5"), operationArgs("cancel"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_locks", "List current infra-lab env locks.", emptySchema(), syntheticToolMeta("operation", "LOW", false, false, "Stage 5"), noArgs("__operation__", "locks"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.operation_unlock_stale", "Remove an expired env lock only when it is stale.", operationUnlockSchema(), syntheticToolMeta("operation", "MEDIUM", false, false, "Stage 5"), operationUnlockArgs(), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_prepare", "Prepare an approved new environment creation operation.", envUpPrepareSchema(), syntheticToolMeta("approved_env_up", "HIGH", false, true, "Stage 6"), envUpPrepareArgs(), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_up_commit", "Commit a prepared new environment creation operation after approval.", addonCommitSchema(), syntheticToolMeta("approved_env_up", "HIGH", false, true, "Stage 6"), envUpCommitArgs(), 30*time.Minute)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_down_prepare", "Prepare an approved destructive env down operation.", destructivePrepareSchema(false, false), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructivePrepareArgs("env_down_prepare"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_down_commit", "Commit a prepared env down operation after approval.", addonCommitSchema(), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructiveCommitArgs("env_down_commit"), 30*time.Minute)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_clean_prepare", "Prepare an approved destructive env clean operation.", destructivePrepareSchema(false, false), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructivePrepareArgs("env_clean_prepare"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.env_clean_commit", "Commit a prepared env clean operation after approval.", addonCommitSchema(), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructiveCommitArgs("env_clean_commit"), 10*time.Minute)
+	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_rebuild_prepare", "Prepare an approved destructive env rebuild operation.", destructivePrepareSchema(true, false), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructivePrepareArgs("env_rebuild_prepare"), 30*time.Second)
+	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "infra_lab.env_rebuild_commit", "Commit a prepared env rebuild operation after approval.", addonCommitSchema(), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructiveCommitArgs("env_rebuild_commit"), 45*time.Minute)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_uninstall_prepare", "Prepare an approved destructive addon uninstall operation.", destructivePrepareSchema(false, true), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructivePrepareArgs("addon_uninstall_prepare"), 30*time.Second)
+	addSynthetic([]string{"env.status.v1"}, "infra_lab.addon_uninstall_commit", "Commit a prepared addon uninstall operation after approval.", addonCommitSchema(), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructiveCommitArgs("addon_uninstall_commit"), 15*time.Minute)
+	if capabilities["version.v1"] && capabilities["capabilities.v1"] {
+		addToolCatalog(handlers)
+	}
 
 	return handlers
 }
 
-func addTool(handlers map[string]toolHandler, name, description string, schema map[string]any, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
+func directToolMeta(capability, category, risk, stage string) toolMetadata {
+	return toolMetadata{
+		RequiredCapabilities: []string{capability},
+		Category:             category,
+		Risk:                 risk,
+		Destructive:          false,
+		RequiresApproval:     false,
+		Source:               "ilab-capability",
+		Stage:                stage,
+	}
+}
+
+func syntheticToolMeta(category, risk string, destructive, requiresApproval bool, stage string) toolMetadata {
+	return toolMetadata{
+		Category:         category,
+		Risk:             risk,
+		Destructive:      destructive,
+		RequiresApproval: requiresApproval,
+		Stage:            stage,
+	}
+}
+
+func addTool(handlers map[string]toolHandler, name, description string, schema map[string]any, metadata toolMetadata, ilabArgs func(json.RawMessage) ([]string, error), timeout time.Duration) {
 	handlers[name] = toolHandler{
 		tool: tool{
 			Name:        name,
 			Description: description,
 			InputSchema: schema,
 		},
+		metadata: metadata,
 		call: func(raw json.RawMessage) (toolResult, error) {
 			args, err := ilabArgs(raw)
 			if err != nil {

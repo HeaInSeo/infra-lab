@@ -77,6 +77,13 @@ func addSetupCheckTool(handlers map[string]toolHandler, info bootstrapInfo) {
 			Description: "Check whether infra-lab MCP is ready and show client registration guidance. Run this first after connecting.",
 			InputSchema: emptySchema(),
 		},
+		metadata: toolMetadata{
+			RequiredCapabilities: []string{"version.v1", "capabilities.v1"},
+			Category:             "read_only",
+			Risk:                 "LOW",
+			Source:               "mcp-internal",
+			Stage:                "Stage 1",
+		},
 		call: func(_ json.RawMessage) (toolResult, error) {
 			raw, err := setupCheckJSON(info, handlers)
 			if err != nil {

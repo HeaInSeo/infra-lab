@@ -74,9 +74,15 @@ infra_lab.vm_version
 infra_lab.profile_list
 infra_lab.profile_show
 infra_lab.profile_validate
+infra_lab.tool_catalog
 infra_lab.collect_snapshot
 infra_lab.summarize_health
 ```
+
+`infra_lab.tool_catalog`는 현재 MCP 서버에 실제 등록된 tool 목록과 각 tool의
+필요 capability, category, risk, destructive 여부, 승인 필요 여부를 반환한다.
+`ilab capabilities --json`은 낮은 레벨 capability만 보여주므로, agent가 실제로
+볼 수 있는 MCP tool 목록은 이 catalog를 기준으로 확인한다.
 
 금지:
 
