@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.7.5 - 2026-07-04
+
+### Added
+
+- Added the `lustre-lab` OpenTofu root module for an isolated single-node Lustre lab VM, including a libvirt pool, Rocky base image volume, OS disk, dedicated Lustre target disk, cloud-init seed, and VM domain.
+- Added `infra_lab.tool_catalog`, a read-only MCP introspection tool that reports the actual registered MCP tools with category, risk, destructive status, approval requirement, source, stage, and required capability gates.
+- Added MCP tool catalog documentation and included `lustre-lab` in HCL validation.
+
+### Fixed
+
+- Updated the Lustre lab module to the current `dmacvicar/libvirt` provider schema and added provider lock coverage for the new module.
+- Ignored local `terraform.tfvars` and `tofu.tfvars` files to match the documented secret-handling guidance.
+
+### Validated
+
+- `make test-mcp`
+- `make test-contract`
+- `make test-go`
+- `make lint-hcl`
+- GitHub Actions checks on PR #17.
+
 ## v0.7.4 - 2026-07-02
 
 ### Added
