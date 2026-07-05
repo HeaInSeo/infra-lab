@@ -123,6 +123,7 @@ func (p *Profile) Validate() []string {
 // It is the single source of truth for an environment's desired state.
 type Profile struct {
 	Name       string         `yaml:"name"`
+	NamePrefix string         `yaml:"namePrefix,omitempty"`
 	Backend    string         `yaml:"backend"`
 	VM         VMSpec         `yaml:"vm"`
 	Kubernetes KubernetesSpec `yaml:"kubernetes"`
@@ -329,6 +330,11 @@ func (p *Profile) ToEnvVars() map[string]string {
 	vars["ENV_NAME"] = p.EnvName()
 	vars["BACKEND"] = p.Backend
 	vars["CNI"] = p.Kubernetes.CNI
+
+	if p.NamePrefix != "" {
+		vars["TF_VAR_name_prefix"] = p.NamePrefix
+		vars["NAME_PREFIX"] = p.NamePrefix
+	}
 
 	if p.VM.Masters > 0 {
 		vars["TF_VAR_masters"] = fmt.Sprintf("%d", p.VM.Masters)

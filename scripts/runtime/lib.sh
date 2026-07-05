@@ -26,7 +26,7 @@ ssh_opts() {
 # wait_for_ssh blocks until SSH on endpoint accepts connections or times out.
 wait_for_ssh() {
   local endpoint="$1"
-  local attempt=0 max_attempts=60 delay=15
+  local attempt=0 max_attempts=120 delay=15
   local opts=()
   while IFS= read -r -d '' opt; do
     opts+=("$opt")
