@@ -53,6 +53,9 @@ install_optional() {
     cilium)
       bash "${ROOT_DIR}/addons/optional/cilium/install.sh"
       ;;
+    harbor)
+      bash "${ROOT_DIR}/addons/optional/harbor/install.sh"
+      ;;
     *)
       echo "unknown optional addon: $1" >&2
       exit 1
@@ -70,6 +73,9 @@ uninstall_optional() {
       ;;
     cilium)
       bash "${ROOT_DIR}/addons/optional/cilium/uninstall.sh"
+      ;;
+    harbor)
+      bash "${ROOT_DIR}/addons/optional/harbor/uninstall.sh"
       ;;
     *)
       echo "unknown optional addon: $1" >&2
@@ -89,6 +95,9 @@ verify_optional() {
     cilium)
       bash "${ROOT_DIR}/addons/optional/cilium/verify.sh"
       ;;
+    harbor)
+      bash "${ROOT_DIR}/addons/optional/harbor/verify.sh"
+      ;;
     *)
       echo "unknown optional addon: $1" >&2
       exit 1
@@ -107,6 +116,9 @@ is_installed() {
     cilium)
       kubectl -n kube-system get ds cilium >/dev/null 2>&1
       ;;
+    harbor)
+      kubectl -n harbor get deployment harbor-core >/dev/null 2>&1
+      ;;
     *)
       return 1
       ;;
@@ -116,7 +128,7 @@ is_installed() {
 verify_installed() {
   verify_base
 
-  for addon in local-path-storage metallb cilium; do
+  for addon in local-path-storage metallb cilium harbor; do
     if is_installed "$addon"; then
       verify_optional "$addon"
     fi

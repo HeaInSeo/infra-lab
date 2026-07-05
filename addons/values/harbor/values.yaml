@@ -1,0 +1,61 @@
+# Harbor Helm values — infra-lab lab environment
+# Harbor 2.12 / chart 1.16
+# - NodePort HTTP (TLS 없음, lab 용도)
+# - local-path StorageClass 필수 (local-path-storage addon 선행 설치)
+# - externalURL 은 install.sh 에서 --set 으로 주입
+
+expose:
+  type: nodePort
+  tls:
+    enabled: false
+  nodePort:
+    ports:
+      http:
+        nodePort: 30002
+
+# install.sh 에서 --set externalURL 으로 override
+externalURL: http://127.0.0.1:30002
+
+persistence:
+  enabled: true
+  resourcePolicy: "keep"
+  persistentVolumeClaim:
+    registry:
+      storageClass: "local-path"
+      accessMode: ReadWriteOnce
+      size: 20Gi
+    jobservice:
+      jobLog:
+        storageClass: "local-path"
+        accessMode: ReadWriteOnce
+        size: 1Gi
+    database:
+      storageClass: "local-path"
+      accessMode: ReadWriteOnce
+      size: 5Gi
+    redis:
+      storageClass: "local-path"
+      accessMode: ReadWriteOnce
+      size: 1Gi
+    trivy:
+      storageClass: "local-path"
+      accessMode: ReadWriteOnce
+      size: 5Gi
+
+harborAdminPassword: "Harbor12345"
+
+trivy:
+  enabled: true
+
+# lab: 단일 replica
+core:
+  replicas: 1
+
+jobservice:
+  replicas: 1
+
+registry:
+  replicas: 1
+
+portal:
+  replicas: 1
