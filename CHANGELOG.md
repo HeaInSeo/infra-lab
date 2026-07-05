@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.7.6 - 2026-07-06
+
+### Added
+
+- Added `Harbor` optional addon (`addons/optional/harbor/`) — Helm-based Harbor v2.12 installation with NodePort HTTP exposure (`:30002`), local-path PVC storage, and trivy scanning. Registered in `addons/manage.sh` (install/uninstall/verify/is_installed). MCP `addon_install harbor` now works end-to-end.
+- Added `namePrefix` field to `Profile` struct; `ToEnvVars()` now sets `TF_VAR_name_prefix` and `NAME_PREFIX` so concurrent libvirt environments can use distinct VM name prefixes and coexist without domain name collisions. (#29)
+
+### Fixed
+
+- Fixed `env_rebuild` leaving the environment invisible to MCP on failure by saving and restoring `meta` and `resolved-profile.yaml` before the rebuild attempt. (#27)
+- Fixed `flannel-to-cilium.sh` STEP 3 quoting bug that caused `unexpected EOF while looking for matching '''` on the SSH runtime path. (#28)
+- Fixed libvirt cilium `env up` not triggering the flannel→cilium migration: added `_extract_libvirt_endpoints` helper and a libvirt branch in the `CNI=cilium` up path in `k8s-tool.sh`. (#28)
+- Extended `wait_for_ssh` timeout from 900 s (60 × 15 s) to 1800 s (120 × 15 s) to accommodate k8s 1.36 cloud-init package install time. (#30)
+- Added `wait_for_ssh` call in `run-remote.sh` before file transfer so the provisioner waits for the VM to become reachable before attempting SSH. (#26)
+
+### Validated
+
+- `make test-go`
+- End-to-end on `seoy-libvirt-cilium` (libvirt, k8s v1.36.2, cilium 1.16.5): env up, flannel→cilium migration, Harbor addon install via MCP, local-path-storage addon install via MCP.
+- Flannel swap test: `remote-seoy-libvirt-flannel` env up (namePrefix=flannel) → flannel→cilium migration → env down.
+
 ## v0.7.5 - 2026-07-04
 
 ### Added
