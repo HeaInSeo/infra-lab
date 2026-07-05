@@ -101,7 +101,7 @@ for node in "${NODES[@]}"; do
     # iptables flannel 규칙 정리 (오류 무시)
     iptables-save 2>/dev/null | grep -v FLANNEL | iptables-restore 2>/dev/null || true
 
-    echo "  CNI 정리 완료"
+    echo CNI-cleanup-done
   '"
 done
 

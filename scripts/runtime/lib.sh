@@ -23,6 +23,29 @@ ssh_opts() {
   printf '%s\0' "${opts[@]}"
 }
 
+# wait_for_ssh blocks until SSH on endpoint accepts connections or times out.
+wait_for_ssh() {
+  local endpoint="$1"
+  local attempt=0 max_attempts=60 delay=15
+  local opts=()
+  while IFS= read -r -d '' opt; do
+    opts+=("$opt")
+  done < <(ssh_opts)
+
+  echo "[INFO] waiting for SSH on ${endpoint} (max $((max_attempts * delay))s)..."
+  while (( attempt < max_attempts )); do
+    if ssh "${opts[@]}" "${VM_USER}@${endpoint}" true 2>/dev/null; then
+      echo "[INFO] SSH ready on ${endpoint}"
+      return 0
+    fi
+    (( attempt++ ))
+    echo "[INFO] SSH not ready (attempt ${attempt}/${max_attempts}), retrying in ${delay}s..."
+    sleep "$delay"
+  done
+  echo "[ERROR] SSH on ${endpoint} not ready after $((max_attempts * delay))s" >&2
+  return 1
+}
+
 require_runtime() {
   case "$VM_RUNTIME" in
     multipass)

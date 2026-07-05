@@ -207,6 +207,34 @@ passthrough_env() {
   done < <(env)
 }
 
+# _extract_libvirt_endpoints <master_var> <worker_var>
+# Reads master/worker IPs from tfstate into the named variables.
+_extract_libvirt_endpoints() {
+  local -n _out_master="$1"
+  local -n _out_worker="$2"
+  local _state_file="${STATE_DIR:+${STATE_DIR}/terraform.tfstate}"
+  _state_file="${_state_file:-$(backend_dir)/terraform.tfstate}"
+  _out_master=""
+  _out_worker=""
+  if [[ -f "$_state_file" ]] && command -v jq >/dev/null 2>&1; then
+    local _triggers
+    _triggers="$(jq -r '
+      .resources[]
+      | select(.type == "null_resource" and .name == "join_all")
+      | .instances[0].attributes.triggers
+    ' "$_state_file" 2>/dev/null)"
+    local _m0 _m_extra
+    _m0="$(printf '%s' "$_triggers" | jq -r '.master0_ip // ""')"
+    _m_extra="$(printf '%s' "$_triggers" | jq -r '.master_ips // ""')"
+    _out_worker="$(printf '%s' "$_triggers" | jq -r '.worker_ips // ""')"
+    if [[ -n "$_m_extra" ]]; then
+      _out_master="${_m0},${_m_extra}"
+    else
+      _out_master="${_m0}"
+    fi
+  fi
+}
+
 _write_vm_build_json() {
   local _commit _branch _runtime _master_endpoints="" _worker_endpoints=""
   _commit="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -225,27 +253,7 @@ _write_vm_build_json() {
 
   # For libvirt SSH runtime, extract VM IPs from tofu state when not already set.
   if [[ "$_runtime" == "ssh" && -z "${MASTER_ENDPOINTS:-}" && -z "${WORKER_ENDPOINTS:-}" ]]; then
-    local _state_file="${STATE_DIR:+${STATE_DIR}/terraform.tfstate}"
-    _state_file="${_state_file:-$(backend_dir)/terraform.tfstate}"
-    if [[ -f "$_state_file" ]] && command -v jq >/dev/null 2>&1; then
-      local _triggers
-      _triggers="$(jq -r '
-        .resources[]
-        | select(.type == "null_resource" and .name == "join_all")
-        | .instances[0].attributes.triggers
-      ' "$_state_file" 2>/dev/null)"
-      local _m0
-      _m0="$(printf '%s' "$_triggers" | jq -r '.master0_ip // ""')"
-      local _m_extra
-      _m_extra="$(printf '%s' "$_triggers" | jq -r '.master_ips // ""')"
-      _worker_endpoints="$(printf '%s' "$_triggers" | jq -r '.worker_ips // ""')"
-      # master_ips holds extra masters (HA); for single-master clusters it is empty
-      if [[ -n "$_m_extra" ]]; then
-        _master_endpoints="${_m0},${_m_extra}"
-      else
-        _master_endpoints="${_m0}"
-      fi
-    fi
+    _extract_libvirt_endpoints _master_endpoints _worker_endpoints
   fi
 
   echo "[INFO] writing /etc/infra-lab/build.json to all VMs"
@@ -396,6 +404,20 @@ case "$cmd" in
       if [[ "$BACKEND" == "multipass" ]]; then
         echo "[INFO] CNI=cilium: running Flannel → Cilium migration"
         NAME_PREFIX="$NAME_PREFIX" bash "${ROOT_DIR}/scripts/cluster/flannel-to-cilium.sh"
+      elif [[ "$BACKEND" == "libvirt" ]]; then
+        echo "[INFO] CNI=cilium: running Flannel → Cilium migration (libvirt/ssh)"
+        _master_eps="" _worker_eps=""
+        _extract_libvirt_endpoints _master_eps _worker_eps
+        if [[ -z "$_master_eps" ]]; then
+          echo "[ERROR] CNI=cilium libvirt: could not resolve master IPs from tfstate" >&2
+          exit 1
+        fi
+        VM_RUNTIME=ssh \
+        SSH_PRIVATE_KEY_PATH="${TF_VAR_ssh_private_key_path:-}" \
+        MASTER_ENDPOINTS="$_master_eps" \
+        WORKER_ENDPOINTS="$_worker_eps" \
+        NAME_PREFIX="$NAME_PREFIX" \
+          bash "${ROOT_DIR}/scripts/cluster/flannel-to-cilium.sh"
       else
         echo "[WARN] CNI=cilium with BACKEND=${BACKEND}: auto-migration is not supported for this backend." >&2
         echo "[WARN] Run scripts/cluster/flannel-to-cilium.sh manually after setting the VM endpoints." >&2

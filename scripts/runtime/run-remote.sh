@@ -16,6 +16,8 @@ if [[ ! -f "$local_script" ]]; then
   exit 1
 fi
 
+wait_for_ssh "$endpoint"
+
 echo "[INFO] transfer $local_script -> ${endpoint}:${remote_path}"
 vm_write_file "$endpoint" "$local_script" "$remote_path"
 

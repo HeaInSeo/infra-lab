@@ -363,9 +363,10 @@ func runEnvRebuild(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("down failed: %w", err)
 	}
 
-	// Step 2: remove state dir.
+	// Step 2: remove state dir (save recovery files first).
 	stateDir := filepath.Join(root, p.State.Dir)
 	fmt.Printf("==> Step 2/3: removing state dir %s\n", stateDir)
+	recovery := readRebuildRecoveryFiles(stateDir)
 	if err := os.RemoveAll(stateDir); err != nil {
 		return fmt.Errorf("remove state dir: %w", err)
 	}
@@ -373,10 +374,48 @@ func runEnvRebuild(_ *cobra.Command, args []string) error {
 	// Step 3: up.
 	fmt.Println("==> Step 3/3: env up")
 	if err := runKToolWithProfile(root, p, "up"); err != nil {
+		restoreRebuildRecoveryFiles(stateDir, recovery)
 		return fmt.Errorf("up failed: %w", err)
 	}
 
 	return writeResolvedProfile(root, p)
+}
+
+type rebuildRecovery struct {
+	meta            []byte
+	resolvedProfile []byte
+}
+
+func readRebuildRecoveryFiles(stateDir string) rebuildRecovery {
+	var r rebuildRecovery
+	r.meta, _ = os.ReadFile(filepath.Join(stateDir, "meta"))
+	r.resolvedProfile, _ = os.ReadFile(filepath.Join(stateDir, "resolved-profile.yaml"))
+	return r
+}
+
+func restoreRebuildRecoveryFiles(stateDir string, r rebuildRecovery) {
+	if len(r.meta) == 0 && len(r.resolvedProfile) == 0 {
+		return
+	}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] rebuild recovery: could not create state dir: %v\n", err)
+		return
+	}
+	if len(r.meta) > 0 {
+		if err := os.WriteFile(filepath.Join(stateDir, "meta"), r.meta, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "[WARN] rebuild recovery: could not restore meta: %v\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "[INFO] rebuild recovery: restored meta")
+		}
+	}
+	if len(r.resolvedProfile) > 0 {
+		if err := os.WriteFile(filepath.Join(stateDir, "resolved-profile.yaml"), r.resolvedProfile, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "[WARN] rebuild recovery: could not restore resolved-profile.yaml: %v\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "[INFO] rebuild recovery: restored resolved-profile.yaml")
+		}
+	}
+	fmt.Fprintln(os.Stderr, "[INFO] rebuild recovery: state files restored — env is visible to MCP; retry rebuild or run env down to clean up")
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
