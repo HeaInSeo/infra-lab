@@ -72,11 +72,14 @@ echo "[harbor-install] namespace: ${HARBOR_NAMESPACE}"
 if ! kubectl get storageclass local-path >/dev/null 2>&1; then
   echo "[harbor-install] installing local-path-provisioner ${LOCAL_PATH_VERSION}..."
   kubectl apply -f "https://raw.githubusercontent.com/rancher/local-path-provisioner/${LOCAL_PATH_VERSION}/deploy/local-path-storage.yaml"
-  kubectl annotate storageclass local-path storageclass.kubernetes.io/is-default-class=true --overwrite
   kubectl rollout status deployment/local-path-provisioner -n local-path-storage --timeout=120s
 else
   echo "[harbor-install] local-path StorageClass already present, skipping."
 fi
+# Ensure local-path is default even when the StorageClass pre-existed (e.g. from
+# a prior environment) -- otherwise charts that omit an explicit storageClassName
+# leave PVCs permanently unbound.
+kubectl annotate storageclass local-path storageclass.kubernetes.io/is-default-class=true --overwrite
 
 # ── 2. harbor namespace ───────────────────────────────────────────────────────
 
