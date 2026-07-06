@@ -124,7 +124,7 @@ commit은 승인 후에만 실행한다.
         "description": "state를 변경하지 않는 조회 도구",
         "tools": [
           {
-            "name": "infra_lab.env_list",
+            "name": "env_list",
             "purpose": "환경 목록 조회",
             "mutates": false,
             "requiresApproval": false
@@ -136,10 +136,10 @@ commit은 승인 후에만 실행한다.
       {
         "name": "approvedEnvUp",
         "steps": [
-          "infra_lab.up_plan",
-          "infra_lab.env_up_prepare",
-          "infra_lab.operation_approve",
-          "infra_lab.env_up_commit"
+          "up_plan",
+          "env_up_prepare",
+          "operation_approve",
+          "env_up_commit"
         ]
       }
     ]
@@ -151,7 +151,7 @@ commit은 승인 후에만 실행한다.
 
 ## 5. 신규 Tool
 
-`infra_lab.what_can_i_do`를 추가한다.
+`what_can_i_do`를 추가한다.
 
 목적:
 
@@ -189,7 +189,7 @@ data.recommendedPrompts
 
 ```text
 - setup_check에 data.tools 추가
-- infra_lab.what_can_i_do 추가
+- what_can_i_do 추가
 - tool category summary 추가
 - 사용자 설명서 업데이트
 - make test-mcp 통과
@@ -249,7 +249,7 @@ data.recommendedPrompts
 1. tool catalog 타입 추가
 2. 현재 등록된 handlers 기준으로 category 구성
 3. setup_check data.tools에 포함
-4. infra_lab.what_can_i_do 등록
+4. what_can_i_do 등록
 5. 사용자 설명서 업데이트
 6. make test-mcp
 ```

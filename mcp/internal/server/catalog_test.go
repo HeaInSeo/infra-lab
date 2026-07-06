@@ -15,10 +15,10 @@ func TestToolCatalogIncludesMutationTools(t *testing.T) {
 	if catalog.Summary.Destructive == 0 {
 		t.Fatal("expected destructive tools")
 	}
-	if !catalogHasTool(catalog, "infra_lab.env_up_prepare") {
+	if !catalogHasTool(catalog, "env_up_prepare") {
 		t.Fatal("expected env_up_prepare in catalog")
 	}
-	if !catalogHasTool(catalog, "infra_lab.env_down_commit") {
+	if !catalogHasTool(catalog, "env_down_commit") {
 		t.Fatal("expected env_down_commit in catalog")
 	}
 }
@@ -58,9 +58,9 @@ func TestToolCatalogRegisteredWithBootstrapCapabilities(t *testing.T) {
 		},
 	})
 
-	handler, ok := handlers["infra_lab.tool_catalog"]
+	handler, ok := handlers["tool_catalog"]
 	if !ok {
-		t.Fatal("expected infra_lab.tool_catalog")
+		t.Fatal("expected tool_catalog")
 	}
 	if handler.metadata.Category != "introspection" {
 		t.Fatalf("category = %q, want introspection", handler.metadata.Category)
@@ -80,17 +80,17 @@ func TestBuildToolCatalogIncludesCapabilityGates(t *testing.T) {
 	})
 
 	catalog := buildToolCatalog(handlers)
-	version := catalogEntryByName(catalog, "infra_lab.version")
+	version := catalogEntryByName(catalog, "version")
 	if version == nil {
-		t.Fatal("missing infra_lab.version")
+		t.Fatal("missing version")
 	}
 	if len(version.RequiredCapabilities) != 1 || version.RequiredCapabilities[0] != "version.v1" {
 		t.Fatalf("version required capabilities = %#v", version.RequiredCapabilities)
 	}
 
-	envUp := catalogEntryByName(catalog, "infra_lab.env_up_commit")
+	envUp := catalogEntryByName(catalog, "env_up_commit")
 	if envUp == nil {
-		t.Fatal("missing infra_lab.env_up_commit")
+		t.Fatal("missing env_up_commit")
 	}
 	if envUp.Category != "approved_env_up" || envUp.Risk != "HIGH" || envUp.Destructive {
 		t.Fatalf("unexpected env_up metadata: %#v", envUp)
@@ -104,7 +104,7 @@ func TestBuildToolCatalogIncludesCapabilityGates(t *testing.T) {
 		t.Fatalf("env_up required capabilities = %#v", envUp.RequiredCapabilities)
 	}
 
-	if got := catalogEntryByName(catalog, "infra_lab.doctor"); got != nil {
+	if got := catalogEntryByName(catalog, "doctor"); got != nil {
 		t.Fatalf("doctor should not be cataloged without doctor.v1: %#v", got)
 	}
 }
@@ -119,7 +119,7 @@ func TestToolCatalogCallReturnsEnvelope(t *testing.T) {
 		},
 	})
 
-	result, err := handlers["infra_lab.tool_catalog"].call(nil)
+	result, err := handlers["tool_catalog"].call(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

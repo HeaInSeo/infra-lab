@@ -16,13 +16,13 @@
 처음 연결되면 다음 순서로 확인한다.
 
 ```text
-infra_lab.setup_check
-infra_lab.what_can_i_do
-infra_lab.version
-infra_lab.capabilities
-infra_lab.doctor
-infra_lab.profile_list
-infra_lab.env_list
+setup_check
+what_can_i_do
+version
+capabilities
+doctor
+profile_list
+env_list
 ```
 
 목표:
@@ -58,8 +58,8 @@ plan-only → prepare → operation_approve → commit → operation_status/logs
 특정 env를 진단할 때는 snapshot을 우선 사용한다.
 
 ```text
-infra_lab.collect_snapshot
-infra_lab.summarize_health
+collect_snapshot
+summarize_health
 ```
 
 agent는 snapshot의 `data.health`, `data.findings`, `warnings`, `errors` 근거만 사용해 진단한다.
@@ -69,11 +69,11 @@ agent는 snapshot의 `data.health`, `data.findings`, `warnings`, `errors` 근거
 실행 전에는 plan-only tool을 먼저 호출한다.
 
 ```text
-infra_lab.up_plan
-infra_lab.down_plan
-infra_lab.rebuild_plan
-infra_lab.addon_install_plan
-infra_lab.addon_uninstall_plan
+up_plan
+down_plan
+rebuild_plan
+addon_install_plan
+addon_uninstall_plan
 ```
 
 응답에서 반드시 확인할 필드:
@@ -93,16 +93,16 @@ targetFingerprint
 새 desired state가 필요하면 profile write tool을 사용한다.
 
 ```text
-infra_lab.profile_save_as
-infra_lab.profile_clone
-infra_lab.profile_validate_and_save
+profile_save_as
+profile_clone
+profile_validate_and_save
 ```
 
 저장 후에는 다음을 다시 수행한다.
 
 ```text
-infra_lab.profile_validate
-infra_lab.up_plan
+profile_validate
+up_plan
 ```
 
 ## 5. 승인형 실행
@@ -112,12 +112,12 @@ infra_lab.up_plan
 예:
 
 ```text
-infra_lab.addon_install_prepare
-infra_lab.env_up_prepare
-infra_lab.env_down_prepare
-infra_lab.env_clean_prepare
-infra_lab.env_rebuild_prepare
-infra_lab.addon_uninstall_prepare
+addon_install_prepare
+env_up_prepare
+env_down_prepare
+env_clean_prepare
+env_rebuild_prepare
+addon_uninstall_prepare
 ```
 
 prepare 후 확인:
@@ -135,24 +135,24 @@ approval.status
 명시 승인:
 
 ```text
-infra_lab.operation_approve
+operation_approve
 ```
 
 승인 후 상태 확인:
 
 ```text
-infra_lab.operation_status
+operation_status
 ```
 
 commit:
 
 ```text
-infra_lab.addon_install_commit
-infra_lab.env_up_commit
-infra_lab.env_down_commit
-infra_lab.env_clean_commit
-infra_lab.env_rebuild_commit
-infra_lab.addon_uninstall_commit
+addon_install_commit
+env_up_commit
+env_down_commit
+env_clean_commit
+env_rebuild_commit
+addon_uninstall_commit
 ```
 
 `operation_approve` 이후에는 `operationId`만으로 commit할 수 있다.
@@ -171,21 +171,21 @@ infra_lab.addon_uninstall_commit
 실패하면 다음 순서로 확인한다.
 
 ```text
-infra_lab.operation_status
-infra_lab.operation_logs
-infra_lab.collect_snapshot
+operation_status
+operation_logs
+collect_snapshot
 ```
 
 lock 문제가 있으면 먼저 lock 목록을 조회한다.
 
 ```text
-infra_lab.operation_locks
+operation_locks
 ```
 
 lock이 stale인 경우에만 해제한다.
 
 ```text
-infra_lab.operation_unlock_stale
+operation_unlock_stale
 ```
 
 active lock은 해제하지 않는다.
@@ -195,7 +195,7 @@ active lock은 해제하지 않는다.
 아직 실행하지 않은 operation만 취소할 수 있다.
 
 ```text
-infra_lab.operation_cancel
+operation_cancel
 ```
 
 허용 상태:

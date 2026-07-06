@@ -8,12 +8,12 @@ Stage 6에서는 새 환경 생성만 허용한다.
 ## Tools
 
 ```text
-infra_lab.env_up_prepare
-infra_lab.operation_approve
-infra_lab.env_up_commit
-infra_lab.operation_cancel
-infra_lab.operation_status
-infra_lab.operation_logs
+env_up_prepare
+operation_approve
+env_up_commit
+operation_cancel
+operation_status
+operation_logs
 ```
 
 ## 정책

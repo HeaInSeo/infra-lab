@@ -62,24 +62,24 @@ capabilities.v1
 현재 read-only tool:
 
 ```text
-infra_lab.version
-infra_lab.capabilities
-infra_lab.doctor
-infra_lab.env_list
-infra_lab.env_status
-infra_lab.k8s_status
-infra_lab.vm_list
-infra_lab.vm_list_all
-infra_lab.vm_version
-infra_lab.profile_list
-infra_lab.profile_show
-infra_lab.profile_validate
-infra_lab.tool_catalog
-infra_lab.collect_snapshot
-infra_lab.summarize_health
+version
+capabilities
+doctor
+env_list
+env_status
+k8s_status
+vm_list
+vm_list_all
+vm_version
+profile_list
+profile_show
+profile_validate
+tool_catalog
+collect_snapshot
+summarize_health
 ```
 
-`infra_lab.tool_catalog`는 현재 MCP 서버에 실제 등록된 tool 목록과 각 tool의
+`tool_catalog`는 현재 MCP 서버에 실제 등록된 tool 목록과 각 tool의
 필요 capability, category, risk, destructive 여부, 승인 필요 여부를 반환한다.
 `ilab capabilities --json`은 낮은 레벨 capability만 보여주므로, agent가 실제로
 볼 수 있는 MCP tool 목록은 이 catalog를 기준으로 확인한다.
@@ -98,7 +98,7 @@ raw tofu
 
 ```bash
 printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"infra_lab.version","arguments":{}}}' \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"version","arguments":{}}}' \
   | INFRA_LAB_ROOT="$PWD" bin/infra-lab-mcp --transport stdio
 ```
 

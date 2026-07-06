@@ -7,20 +7,20 @@ Stage 7에서는 파괴적 작업을 prepare/commit 2단계로만 허용한다.
 ## Tools
 
 ```text
-infra_lab.env_down_prepare
-infra_lab.env_down_commit
-infra_lab.env_clean_prepare
-infra_lab.env_clean_commit
-infra_lab.env_rebuild_prepare
-infra_lab.env_rebuild_commit
-infra_lab.addon_uninstall_prepare
-infra_lab.addon_uninstall_commit
-infra_lab.operation_approve
-infra_lab.operation_cancel
-infra_lab.operation_locks
-infra_lab.operation_unlock_stale
-infra_lab.operation_status
-infra_lab.operation_logs
+env_down_prepare
+env_down_commit
+env_clean_prepare
+env_clean_commit
+env_rebuild_prepare
+env_rebuild_commit
+addon_uninstall_prepare
+addon_uninstall_commit
+operation_approve
+operation_cancel
+operation_locks
+operation_unlock_stale
+operation_status
+operation_logs
 ```
 
 ## 정책

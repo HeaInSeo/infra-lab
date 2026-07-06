@@ -26,19 +26,19 @@ func TestReadOnlyToolsFilteredByCapability(t *testing.T) {
 		},
 	})
 
-	if _, ok := tools["infra_lab.setup_check"]; !ok {
-		t.Fatal("expected infra_lab.setup_check")
+	if _, ok := tools["setup_check"]; !ok {
+		t.Fatal("expected setup_check")
 	}
-	if _, ok := tools["infra_lab.what_can_i_do"]; !ok {
-		t.Fatal("expected infra_lab.what_can_i_do")
+	if _, ok := tools["what_can_i_do"]; !ok {
+		t.Fatal("expected what_can_i_do")
 	}
-	if _, ok := tools["infra_lab.version"]; !ok {
-		t.Fatal("expected infra_lab.version")
+	if _, ok := tools["version"]; !ok {
+		t.Fatal("expected version")
 	}
-	if _, ok := tools["infra_lab.capabilities"]; !ok {
-		t.Fatal("expected infra_lab.capabilities")
+	if _, ok := tools["capabilities"]; !ok {
+		t.Fatal("expected capabilities")
 	}
-	if _, ok := tools["infra_lab.doctor"]; ok {
-		t.Fatal("did not expect infra_lab.doctor without doctor.v1")
+	if _, ok := tools["doctor"]; ok {
+		t.Fatal("did not expect doctor without doctor.v1")
 	}
 }

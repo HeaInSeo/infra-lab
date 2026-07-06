@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.7.7 - 2026-07-06
+
+### Changed
+
+- **Breaking:** Removed the redundant `infra_lab.` prefix from every MCP tool name (e.g. `infra_lab.doctor` -> `doctor`, `infra_lab.env_up_prepare` -> `env_up_prepare`). The MCP server is already registered under the client-side name `infra-lab`, so the old prefix produced a doubled, easy-to-guess-wrong identifier once Claude Code wrapped it as `mcp__infra-lab__infra_lab_doctor`. The wrapped name is now `mcp__infra-lab__doctor`.
+- Updated all `docs/MCP_*.ko.md` guides and the tool catalog descriptions to the new tool names, and documented the exact `--allowedTools` naming convention for headless (`claude -p`) sessions in `docs/MCP_USER_GUIDE.ko.md`.
+
+### Validated
+
+- `make test-mcp`
+
 ## v0.7.6 - 2026-07-06
 
 ### Added

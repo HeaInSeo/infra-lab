@@ -79,9 +79,9 @@ func TestProfileWriteToolsRegisteredWithValidateCapability(t *testing.T) {
 		Capabilities:    map[string]bool{"profile.validate.v1": true},
 	})
 	for _, name := range []string{
-		"infra_lab.profile_clone",
-		"infra_lab.profile_save_as",
-		"infra_lab.profile_validate_and_save",
+		"profile_clone",
+		"profile_save_as",
+		"profile_validate_and_save",
 	} {
 		if _, ok := handlers[name]; !ok {
 			t.Fatalf("expected %s to be registered", name)

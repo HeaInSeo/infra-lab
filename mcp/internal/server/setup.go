@@ -71,9 +71,9 @@ type setupErrorInfo struct {
 }
 
 func addSetupCheckTool(handlers map[string]toolHandler, info bootstrapInfo) {
-	handlers["infra_lab.setup_check"] = toolHandler{
+	handlers["setup_check"] = toolHandler{
 		tool: tool{
-			Name:        "infra_lab.setup_check",
+			Name:        "setup_check",
 			Description: "Check whether infra-lab MCP is ready and show client registration guidance. Run this first after connecting.",
 			InputSchema: emptySchema(),
 		},
@@ -419,9 +419,9 @@ func setupCheckJSON(info bootstrapInfo, handlers map[string]toolHandler) (string
 			Clients:      clients,
 			Findings:     findings,
 			NextSteps: []string{
-				"Ask the agent to run infra_lab.setup_check first after MCP connection.",
-				"Use infra_lab.doctor for host prerequisite diagnostics.",
-				"Use infra_lab.collect_snapshot before diagnosing an existing lab.",
+				"Ask the agent to run setup_check first after MCP connection.",
+				"Use doctor for host prerequisite diagnostics.",
+				"Use collect_snapshot before diagnosing an existing lab.",
 			},
 		},
 		Warnings: []setupFinding{},

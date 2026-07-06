@@ -61,7 +61,7 @@ func TestToolsListSorted(t *testing.T) {
 
 func TestUnknownTool(t *testing.T) {
 	s := &Server{tools: map[string]toolHandler{}}
-	params := []byte(`{"name":"infra_lab.missing","arguments":{}}`)
+	params := []byte(`{"name":"missing","arguments":{}}`)
 	resp := s.callTool(request{JSONRPC: "2.0", ID: float64(1), Params: params})
 	if resp.Error == nil {
 		t.Fatal("expected JSON-RPC error")

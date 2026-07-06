@@ -8,14 +8,14 @@ Stage 5에서는 `addon_install`만 허용한다.
 ## Tools
 
 ```text
-infra_lab.addon_install_prepare
-infra_lab.operation_approve
-infra_lab.addon_install_commit
-infra_lab.operation_cancel
-infra_lab.operation_locks
-infra_lab.operation_unlock_stale
-infra_lab.operation_status
-infra_lab.operation_logs
+addon_install_prepare
+operation_approve
+addon_install_commit
+operation_cancel
+operation_locks
+operation_unlock_stale
+operation_status
+operation_logs
 ```
 
 ## 정책

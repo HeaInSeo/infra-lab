@@ -97,24 +97,24 @@ profile-gateway-verify
 금지한다.
 
 ```text
-infra_lab.run_shell
-infra_lab.run_script
-infra_lab.run_kubectl
-infra_lab.run_ssh
-infra_lab.run_tofu
-infra_lab.raw_exec
-infra_lab.debug_exec
+run_shell
+run_script
+run_kubectl
+run_ssh
+run_tofu
+raw_exec
+debug_exec
 ```
 
 허용하는 것은 typed tool이다.
 
 ```text
-infra_lab.env_status
-infra_lab.profile_validate
-infra_lab.collect_snapshot
-infra_lab.up_plan
-infra_lab.env_up_prepare
-infra_lab.env_up_commit
+env_status
+profile_validate
+collect_snapshot
+up_plan
+env_up_prepare
+env_up_commit
 ```
 
 agent는 명령 문자열을 만들지 않는다.
@@ -1138,7 +1138,7 @@ ilab operation unlock <env> --stale-only
 ```
 
 MCP tool로 raw unlock은 노출하지 않는다.
-필요 시 read-only `infra_lab.operation_locks`만 노출한다.
+필요 시 read-only `operation_locks`만 노출한다.
 
 ---
 
@@ -1212,13 +1212,13 @@ mutation:
 MCP 서버에는 다음 tool을 만들지 않는다.
 
 ```text
-infra_lab.run_shell
-infra_lab.run_script
-infra_lab.run_kubectl
-infra_lab.run_ssh
-infra_lab.run_tofu
-infra_lab.raw_exec
-infra_lab.debug_exec
+run_shell
+run_script
+run_kubectl
+run_ssh
+run_tofu
+raw_exec
+debug_exec
 ```
 
 `vm ssh`도 agent에게 직접 열지 않는다.
@@ -1247,7 +1247,7 @@ infra-lab state / kubeconfig / VM runtime / Kubernetes API
 예:
 
 ```text
-infra_lab.env_status
+env_status
   → bin/ilab env status <env> --json
 ```
 
@@ -1574,17 +1574,17 @@ agent → infra-lab-mcp → ilab --json
 ## MCP tools
 
 ```text
-infra_lab.version
-infra_lab.capabilities
-infra_lab.doctor
-infra_lab.env_list
-infra_lab.env_status
-infra_lab.k8s_status
-infra_lab.vm_list
-infra_lab.vm_version
-infra_lab.profile_list
-infra_lab.profile_show
-infra_lab.profile_validate
+version
+capabilities
+doctor
+env_list
+env_status
+k8s_status
+vm_list
+vm_version
+profile_list
+profile_show
+profile_validate
 ```
 
 ---
@@ -1712,11 +1712,11 @@ agent가 진단에 필요한 증거를 한 번에 수집하게 한다.
 ## MCP tools
 
 ```text
-infra_lab.collect_snapshot
-infra_lab.collect_cluster_evidence
-infra_lab.collect_vm_evidence
-infra_lab.collect_profile_evidence
-infra_lab.summarize_health
+collect_snapshot
+collect_cluster_evidence
+collect_vm_evidence
+collect_profile_evidence
+summarize_health
 ```
 
 ---
@@ -1803,12 +1803,12 @@ agent가 변경을 실행하지 않고, 변경 계획과 위험도를 판단하�
 ## MCP tools
 
 ```text
-infra_lab.profile_diff
-infra_lab.up_plan
-infra_lab.down_plan
-infra_lab.rebuild_plan
-infra_lab.addon_install_plan
-infra_lab.addon_uninstall_plan
+profile_diff
+up_plan
+down_plan
+rebuild_plan
+addon_install_plan
+addon_uninstall_plan
 ```
 
 ---
@@ -1928,10 +1928,10 @@ RiskLevel
 ## MCP tools
 
 ```text
-infra_lab.profile_new
-infra_lab.profile_clone
-infra_lab.profile_save_as
-infra_lab.profile_validate_and_save
+profile_new
+profile_clone
+profile_save_as
+profile_validate_and_save
 ```
 
 ---
@@ -1986,17 +1986,17 @@ Stage 5에서는 `addon_install`만 허용한다.
 ## MCP tools
 
 ```text
-infra_lab.addon_install_prepare
-infra_lab.addon_install_commit
-infra_lab.operation_status
-infra_lab.operation_logs
+addon_install_prepare
+addon_install_commit
+operation_status
+operation_logs
 ```
 
 제외:
 
 ```text
-infra_lab.addon_uninstall_prepare
-infra_lab.addon_uninstall_commit
+addon_uninstall_prepare
+addon_uninstall_commit
 ```
 
 ---
@@ -2142,10 +2142,10 @@ agent가 승인 기반으로 새 환경을 생성할 수 있게 한다.
 ## MCP tools
 
 ```text
-infra_lab.env_up_prepare
-infra_lab.env_up_commit
-infra_lab.operation_status
-infra_lab.operation_logs
+env_up_prepare
+env_up_commit
+operation_status
+operation_logs
 ```
 
 ---
@@ -2205,14 +2205,14 @@ infra_lab.operation_logs
 ## MCP tools
 
 ```text
-infra_lab.env_down_prepare
-infra_lab.env_down_commit
-infra_lab.env_rebuild_prepare
-infra_lab.env_rebuild_commit
-infra_lab.env_clean_prepare
-infra_lab.env_clean_commit
-infra_lab.addon_uninstall_prepare
-infra_lab.addon_uninstall_commit
+env_down_prepare
+env_down_commit
+env_rebuild_prepare
+env_rebuild_commit
+env_clean_prepare
+env_clean_commit
+addon_uninstall_prepare
+addon_uninstall_commit
 ```
 
 ---

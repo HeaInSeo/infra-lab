@@ -8,9 +8,9 @@ VM, Kubernetes, tofu state, kubeconfig는 변경하지 않는다.
 ## Tools
 
 ```text
-infra_lab.profile_save_as
-infra_lab.profile_validate_and_save
-infra_lab.profile_clone
+profile_save_as
+profile_validate_and_save
+profile_clone
 ```
 
 ## 정책
@@ -129,6 +129,6 @@ make test-mcp
 MCP client에서 다음을 호출한다.
 
 ```text
-infra_lab.profile_save_as
-infra_lab.profile_clone
+profile_save_as
+profile_clone
 ```
