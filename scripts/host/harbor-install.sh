@@ -257,12 +257,22 @@ kubectl wait nodes --all --for=condition=Ready --timeout=120s
 
 HARBOR_API="${HARBOR_EXTERNAL_URL}/api/v2.0"
 
+# core/nginx가 막 재시작된 직후라 API가 아직 응답하지 않을 수 있다. curl 실패를
+# set -e가 아무 설명 없이 삼켜서 스크립트가 조용히 죽는 것을 방지한다.
+echo "[harbor-install] waiting for Harbor API to become ready..."
+for i in $(seq 1 24); do
+  READY_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "${HARBOR_API}/systeminfo" || echo "000")
+  [[ "${READY_CODE}" == "200" ]] && break
+  echo "[harbor-install]   Harbor API not ready yet (http=${READY_CODE})... (${i}/24)"
+  sleep 5
+done
+
 echo "[harbor-install] configuring GHCR proxy cache endpoint..."
 HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" \
   -X POST "${HARBOR_API}/registries" \
   -u "admin:${HARBOR_ADMIN_PASSWORD}" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"ghcr.io","type":"docker-registry","url":"https://ghcr.io","insecure":false}')
+  -d '{"name":"ghcr.io","type":"docker-registry","url":"https://ghcr.io","insecure":false}' || echo "000")
 
 if [[ "${HTTP_CODE}" == "201" ]]; then
   echo "[harbor-install] ghcr.io endpoint created."
@@ -280,7 +290,7 @@ HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" \
   -X POST "${HARBOR_API}/projects" \
   -u "admin:${HARBOR_ADMIN_PASSWORD}" \
   -H 'Content-Type: application/json' \
-  -d "{\"project_name\":\"ghcr-io\",\"public\":true,\"registry_id\":${REGISTRY_ID},\"metadata\":{\"proxy_speed_kb\":\"-1\"}}")
+  -d "{\"project_name\":\"ghcr-io\",\"public\":true,\"registry_id\":${REGISTRY_ID},\"metadata\":{\"proxy_speed_kb\":\"-1\"}}" || echo "000")
 
 if [[ "${HTTP_CODE}" == "201" ]]; then
   echo "[harbor-install] ghcr-io proxy project created."
