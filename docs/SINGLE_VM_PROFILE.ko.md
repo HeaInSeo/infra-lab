@@ -53,7 +53,7 @@ ilab env ssh ebpf-dev
 ilab env info ebpf-dev --json
 ```
 
-`env up`은 OpenTofu(`tofu`)로 `backends/single-vm` 모듈을 적용한다. VM이 SSH 가능해질 때까지 기다린 뒤 `bootstrap.scripts`를 workspace의 `scripts/` 디렉터리에 복사하고 실행 권한을 부여한다.
+`env up`은 OpenTofu(`tofu`)로 `backends/single-vm` 모듈을 적용한다. `libvirt.poolName`이 이미 있으면 state에 import해서 재사용하고, 없으면 `libvirt.poolPath`에 새 dir pool을 만든다. VM이 SSH 가능해질 때까지 기다린 뒤 `bootstrap.scripts`를 workspace의 `scripts/` 디렉터리에 복사하고 실행 권한을 부여한다.
 
 bootstrap script는 자동 실행하지 않는다. eBPF/Rust 설치는 네트워크와 시간이 많이 걸리므로 사용자가 VM에 접속한 뒤 필요한 순서로 직접 실행한다.
 

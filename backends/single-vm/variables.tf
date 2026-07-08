@@ -51,7 +51,7 @@ variable "libvirt_pool_name" {
 }
 
 variable "libvirt_pool_path" {
-  description = "Filesystem path for the libvirt dir pool"
+  description = "Filesystem path used when single-vm creates the libvirt dir pool"
   type        = string
   default     = "/var/lib/libvirt/images/infra-lab"
 }

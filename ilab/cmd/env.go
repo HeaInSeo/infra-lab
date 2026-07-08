@@ -530,6 +530,7 @@ func runSingleVMUp(root string, p *lab.Profile) error {
 	if err := runWithEnv(root, "tofu", []string{"init", "-input=false"}, nil, backendDir); err != nil {
 		return err
 	}
+	importExistingLibvirtPool(root, backendDir, stateFile, p, vars)
 	args := []string{"apply", "-auto-approve", "-input=false", "-state", stateFile}
 	for _, v := range vars {
 		args = append(args, "-var", v)
@@ -572,6 +573,20 @@ func runSingleVMDown(root string, p *lab.Profile) error {
 		args = append(args, "-var", v)
 	}
 	return runWithEnv(root, "tofu", args, nil, backendDir)
+}
+
+func importExistingLibvirtPool(root, backendDir, stateFile string, p *lab.Profile, vars []string) {
+	if p.Libvirt == nil || p.Libvirt.PoolName == "" {
+		return
+	}
+	args := []string{"import", "-input=false", "-state", stateFile}
+	for _, v := range vars {
+		args = append(args, "-var", v)
+	}
+	args = append(args, "libvirt_pool.lab", p.Libvirt.PoolName)
+	if err := runWithEnv(root, "tofu", args, nil, backendDir); err != nil {
+		fmt.Fprintf(os.Stderr, "[INFO] libvirt pool %q was not imported; apply will create it if needed\n", p.Libvirt.PoolName)
+	}
 }
 
 func singleVMTFVars(p *lab.Profile) ([]string, error) {
