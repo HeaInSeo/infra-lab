@@ -16,6 +16,10 @@ resource "libvirt_pool" "lab" {
     start     = true
     autostart = true
   }
+
+  lifecycle {
+    ignore_changes = all
+  }
 }
 
 resource "libvirt_volume" "ubuntu_base" {
