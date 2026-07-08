@@ -579,14 +579,26 @@ func importExistingLibvirtPool(root, backendDir, stateFile string, p *lab.Profil
 	if p.Libvirt == nil || p.Libvirt.PoolName == "" {
 		return
 	}
+	poolID := p.Libvirt.PoolName
+	if uuid := libvirtPoolUUID(p.Libvirt.PoolName); uuid != "" {
+		poolID = uuid
+	}
 	args := []string{"import", "-input=false", "-state", stateFile}
 	for _, v := range vars {
 		args = append(args, "-var", v)
 	}
-	args = append(args, "libvirt_pool.lab", p.Libvirt.PoolName)
+	args = append(args, "libvirt_pool.lab", poolID)
 	if err := runWithEnv(root, "tofu", args, nil, backendDir); err != nil {
 		fmt.Fprintf(os.Stderr, "[INFO] libvirt pool %q was not imported; apply will create it if needed\n", p.Libvirt.PoolName)
 	}
+}
+
+func libvirtPoolUUID(poolName string) string {
+	out, err := exec.Command("virsh", "-c", "qemu:///system", "pool-uuid", poolName).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func singleVMTFVars(p *lab.Profile) ([]string, error) {
