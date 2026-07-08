@@ -19,6 +19,7 @@ var jsonCapableCommands = map[string]bool{
 	"doctor":           true,
 	"env.list":         true,
 	"env.status":       true,
+	"env.info":         true,
 	"profile.list":     true,
 	"profile.show":     true,
 	"profile.validate": true,

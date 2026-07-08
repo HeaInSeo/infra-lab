@@ -111,6 +111,7 @@ func readOnlyTools(info bootstrapInfo) map[string]toolHandler {
 	add("doctor.v1", "doctor", "Diagnose infra-lab prerequisites and local state.", emptySchema(), noArgs("doctor"), 30*time.Second)
 	add("env.list.v1", "env_list", "List managed infra-lab environments.", emptySchema(), noArgs("env", "list"), 30*time.Second)
 	add("env.status.v1", "env_status", "Show status for one or all environments.", envSchema(), envArgs("env", "status"), 30*time.Second)
+	add("env.info.v1", "env_info", "Show SSH and workspace connection information for an environment.", envSchema(), envArgs("env", "info"), 30*time.Second)
 	add("k8s.status.v1", "k8s_status", "Show Kubernetes node and pod status.", envSchema(), envArgs("k8s", "status"), 60*time.Second)
 	add("vm.list.v1", "vm_list", "List managed VMs.", emptySchema(), noArgs("vm", "list"), 30*time.Second)
 	add("vm.list.v1", "vm_list_all", "List managed and unmanaged VMs.", emptySchema(), noArgs("vm", "list", "--all"), 30*time.Second)

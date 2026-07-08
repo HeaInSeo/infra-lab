@@ -73,8 +73,17 @@ func (p *Profile) CheckImmutableConflicts(proposed map[string]string) []Immutabl
 func (p *Profile) Validate() []string {
 	var errs []string
 
+	switch p.KindOrDefault() {
+	case "kubernetes":
+	case "single-vm":
+	default:
+		errs = append(errs, fmt.Sprintf("kind %q is not supported", p.Kind))
+	}
 	if p.Backend == "" {
 		errs = append(errs, "backend is required")
+	}
+	if p.KindOrDefault() == "single-vm" {
+		return p.validateSingleVM(errs)
 	}
 	if p.Kubernetes.CNI == "" {
 		errs = append(errs, "kubernetes.cni is required")
@@ -119,23 +128,81 @@ func (p *Profile) Validate() []string {
 	return errs
 }
 
+func (p *Profile) validateSingleVM(errs []string) []string {
+	if p.Backend != "libvirt" {
+		errs = append(errs, "backend must be libvirt for kind=single-vm")
+	}
+	if p.VM.Count != 1 {
+		errs = append(errs, "vm.count must be 1 for kind=single-vm")
+	}
+	if p.VM.CPU <= 0 {
+		errs = append(errs, "vm.cpu must be > 0 for kind=single-vm")
+	}
+	if p.VM.Memory == "" {
+		errs = append(errs, "vm.memory is required for kind=single-vm")
+	}
+	if p.VM.Disk == "" {
+		errs = append(errs, "vm.disk is required for kind=single-vm")
+	}
+	if p.VM.ImageURL == "" {
+		errs = append(errs, "vm.imageUrl is required for kind=single-vm")
+	}
+	if p.SSH.User == "" {
+		errs = append(errs, "ssh.user is required for kind=single-vm")
+	}
+	if p.SSH.PrivateKeyPath == "" {
+		errs = append(errs, "ssh.privateKeyPath is required for kind=single-vm")
+	} else {
+		expanded := ExpandTilde(p.SSH.PrivateKeyPath)
+		if _, err := os.Stat(expanded); err != nil {
+			errs = append(errs, fmt.Sprintf("ssh.privateKeyPath not found: %s", expanded))
+		}
+		if _, err := os.Stat(expanded + ".pub"); err != nil {
+			errs = append(errs, fmt.Sprintf("ssh public key not found: %s.pub", expanded))
+		}
+	}
+	if p.Workspace.Path == "" {
+		errs = append(errs, "workspace.path is required for kind=single-vm")
+	}
+	if p.Libvirt == nil {
+		errs = append(errs, "libvirt section is required for backend=libvirt")
+	} else {
+		if p.Libvirt.PoolName == "" {
+			errs = append(errs, "libvirt.poolName is required")
+		}
+		if p.Libvirt.PoolPath == "" {
+			errs = append(errs, "libvirt.poolPath is required")
+		}
+	}
+	return errs
+}
+
 // Profile represents a YAML-based environment profile.
 // It is the single source of truth for an environment's desired state.
 type Profile struct {
+	Kind       string         `yaml:"kind,omitempty"`
 	Name       string         `yaml:"name"`
 	NamePrefix string         `yaml:"namePrefix,omitempty"`
 	Backend    string         `yaml:"backend"`
 	VM         VMSpec         `yaml:"vm"`
 	Kubernetes KubernetesSpec `yaml:"kubernetes"`
 	Addons     AddonsSpec     `yaml:"addons"`
+	SSH        SSHSpec        `yaml:"ssh,omitempty"`
+	Workspace  WorkspaceSpec  `yaml:"workspace,omitempty"`
+	Bootstrap  BootstrapSpec  `yaml:"bootstrap,omitempty"`
 	Libvirt    *LibvirtSpec   `yaml:"libvirt,omitempty"`
 	State      StateSpec      `yaml:"state"`
+	SourcePath string         `yaml:"-"`
 }
 
 // VMSpec describes the VM resources for a profile.
 type VMSpec struct {
 	OSImage  string   `yaml:"osImage"`
 	ImageURL string   `yaml:"imageUrl"`
+	Count    int      `yaml:"count,omitempty"`
+	CPU      int      `yaml:"cpu,omitempty"`
+	Memory   string   `yaml:"memory,omitempty"`
+	Disk     string   `yaml:"disk,omitempty"`
 	Masters  int      `yaml:"masters"`
 	Workers  int      `yaml:"workers"`
 	Master   NodeSpec `yaml:"master"`
@@ -159,6 +226,23 @@ type KubernetesSpec struct {
 type AddonsSpec struct {
 	Base     []string `yaml:"base"`
 	Optional []string `yaml:"optional"`
+}
+
+// SSHSpec describes guest SSH settings for VM-only profiles.
+type SSHSpec struct {
+	User           string `yaml:"user,omitempty"`
+	PrivateKeyPath string `yaml:"privateKeyPath,omitempty"`
+}
+
+// WorkspaceSpec describes the remote workspace created for VM-only profiles.
+type WorkspaceSpec struct {
+	Path string   `yaml:"path,omitempty"`
+	Dirs []string `yaml:"dirs,omitempty"`
+}
+
+// BootstrapSpec lists scripts copied into a VM-only profile workspace.
+type BootstrapSpec struct {
+	Scripts []string `yaml:"scripts,omitempty"`
 }
 
 // LibvirtSpec holds libvirt-specific settings (SSH key, pool).
@@ -222,6 +306,7 @@ func LoadProfile(path string) (*Profile, error) {
 	if err := yaml.Unmarshal(data, &p); err != nil {
 		return nil, fmt.Errorf("parse profile %q: %w", resolved, err)
 	}
+	p.SourcePath = resolved
 
 	// Fill defaults.
 	if p.Name == "" {
@@ -234,8 +319,31 @@ func LoadProfile(path string) (*Profile, error) {
 	if p.State.Dir == "" {
 		p.State.Dir = "state/" + p.Name
 	}
+	if p.Kind == "" {
+		p.Kind = "kubernetes"
+	}
+	if p.Kind == "single-vm" {
+		if p.VM.OSImage == "" {
+			p.VM.OSImage = "ubuntu-24.04"
+		}
+		if p.VM.ImageURL == "" {
+			p.VM.ImageURL = OSImageURL(p.VM.OSImage)
+		}
+		if p.VM.Count == 0 {
+			p.VM.Count = 1
+		}
+	}
 
 	return &p, nil
+}
+
+// KindOrDefault returns the profile kind, preserving backwards compatibility
+// for older Kubernetes profiles that do not set kind.
+func (p *Profile) KindOrDefault() string {
+	if p.Kind == "" {
+		return "kubernetes"
+	}
+	return p.Kind
 }
 
 func profileSource(input, resolved string) string {

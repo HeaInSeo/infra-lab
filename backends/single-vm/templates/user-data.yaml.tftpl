@@ -1,0 +1,15 @@
+#cloud-config
+users:
+  - default
+ssh_authorized_keys:
+  - ${ssh_public_key}
+ssh_pwauth: false
+disable_root: true
+package_update: false
+package_upgrade: false
+runcmd:
+  - [ mkdir, -p, "${workspace_path}" ]
+%{ for dir in workspace_dirs ~}
+  - [ mkdir, -p, "${workspace_path}/${dir}" ]
+%{ endfor ~}
+  - [ chown, -R, "${vm_user}:${vm_user}", "${workspace_path}" ]

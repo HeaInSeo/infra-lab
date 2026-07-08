@@ -97,6 +97,7 @@ func currentCapabilitiesData() capabilitiesData {
 			"doctor.v1",
 			"env.list.v1",
 			"env.status.v1",
+			"env.info.v1",
 			"profile.list.v1",
 			"profile.show.v1",
 			"profile.validate.v1",

@@ -76,6 +76,39 @@ state:
   dir: state/multipass-flannel
 `
 
+func singleVMProfileYAML(keyPath string) string {
+	return `
+kind: single-vm
+name: ebpf-dev
+backend: libvirt
+vm:
+  osImage: ubuntu-24.04
+  imageUrl: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  count: 1
+  cpu: 4
+  memory: 8G
+  disk: 80G
+ssh:
+  user: ubuntu
+  privateKeyPath: ` + keyPath + `
+workspace:
+  path: /home/ubuntu/workspace/ebpf-lab
+  dirs:
+    - c-libbpf
+    - rust-aya
+    - notes
+    - scripts
+bootstrap:
+  scripts:
+    - lab/infra-lab/bootstrap/install-core.sh
+libvirt:
+  poolName: lab-pool
+  poolPath: /var/lib/libvirt/images
+state:
+  dir: state/ebpf-dev
+`
+}
+
 func TestLoadProfile_AbsolutePath(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "libvirt-flannel.yaml")
@@ -93,6 +126,20 @@ func TestLoadProfile_AbsolutePath(t *testing.T) {
 	}
 	if p.Kubernetes.CNI != "flannel" {
 		t.Errorf("p.Kubernetes.CNI = %q, want flannel", p.Kubernetes.CNI)
+	}
+}
+
+func TestLoadProfile_DefaultKindKubernetes(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "multipass-flannel.yaml")
+	writeProfile(t, path, multipassProfileYAML)
+
+	p, err := LoadProfile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.KindOrDefault(); got != "kubernetes" {
+		t.Errorf("KindOrDefault() = %q, want kubernetes", got)
 	}
 }
 
@@ -220,6 +267,32 @@ func TestEnvName_StateDirBasename(t *testing.T) {
 	}
 }
 
+func TestResolveEnvForVMName_SingleVMExactName(t *testing.T) {
+	envs := []*Env{
+		{Name: "ebpf-dev", Kind: "single-vm", NamePrefix: "ebpf-dev"},
+	}
+	env, err := resolveEnvForVMName(envs, "ebpf-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil || env.Name != "ebpf-dev" {
+		t.Fatalf("resolveEnvForVMName() = %#v, want ebpf-dev", env)
+	}
+}
+
+func TestResolveEnvForVMName_SingleVMDoesNotRequireDashSuffix(t *testing.T) {
+	envs := []*Env{
+		{Name: "ebpf-dev", Kind: "single-vm", NamePrefix: "ebpf-dev"},
+	}
+	env, err := resolveEnvForVMName(envs, "ebpf-dev-master-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil {
+		t.Fatal("resolveEnvForVMName() = nil, want prefix match for legacy-style name")
+	}
+}
+
 // ── ToEnvVars ──────────────────────────────────────────────────────────────
 
 func TestToEnvVars_Libvirt(t *testing.T) {
@@ -312,6 +385,53 @@ func TestToEnvVars_NoLibvirtSection(t *testing.T) {
 	}
 	if _, ok := vars["TF_VAR_ssh_public_key"]; ok {
 		t.Error("TF_VAR_ssh_public_key should not be set when Libvirt is nil")
+	}
+}
+
+func TestValidate_SingleVMAllowsNoKubernetesFields(t *testing.T) {
+	tmp := t.TempDir()
+	keyPath := filepath.Join(tmp, "id_ed25519")
+	must(t, os.WriteFile(keyPath, []byte("private key placeholder"), 0600))
+	must(t, os.WriteFile(keyPath+".pub", []byte("ssh-ed25519 AAAArealkey test@example\n"), 0644))
+	path := filepath.Join(tmp, "ebpf-dev.yaml")
+	writeProfile(t, path, singleVMProfileYAML(keyPath))
+
+	p, err := LoadProfile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errs := p.Validate(); len(errs) > 0 {
+		t.Fatalf("Validate() errors = %#v, want none", errs)
+	}
+	if p.Kubernetes.CNI != "" {
+		t.Fatalf("Kubernetes.CNI = %q, want empty for single-vm", p.Kubernetes.CNI)
+	}
+}
+
+func TestValidate_SingleVMRequiresCountOne(t *testing.T) {
+	tmp := t.TempDir()
+	keyPath := filepath.Join(tmp, "id_ed25519")
+	must(t, os.WriteFile(keyPath, []byte("private key placeholder"), 0600))
+	must(t, os.WriteFile(keyPath+".pub", []byte("ssh-ed25519 AAAArealkey test@example\n"), 0644))
+	path := filepath.Join(tmp, "ebpf-dev.yaml")
+	writeProfile(t, path, strings.Replace(singleVMProfileYAML(keyPath), "count: 1", "count: 2", 1))
+
+	p, err := LoadProfile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := p.Validate()
+	if len(errs) == 0 {
+		t.Fatal("Validate() got no errors, want vm.count error")
+	}
+	found := false
+	for _, err := range errs {
+		if err == "vm.count must be 1 for kind=single-vm" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Validate() errors = %#v, want vm.count error", errs)
 	}
 }
 

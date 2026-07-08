@@ -19,6 +19,7 @@ type envListItemData struct {
 	Name      string `json:"name"`
 	Source    string `json:"source"`
 	StateDir  string `json:"stateDir"`
+	Kind      string `json:"kind,omitempty"`
 	Backend   string `json:"backend"`
 	CNI       string `json:"cni"`
 	Status    string `json:"status"`
@@ -37,6 +38,7 @@ type envStatusData struct {
 	Env        string          `json:"env"`
 	StateDir   string          `json:"stateDir"`
 	Profile    *profileRefData `json:"profile,omitempty"`
+	Kind       string          `json:"kind,omitempty"`
 	Backend    string          `json:"backend"`
 	CNI        string          `json:"cni"`
 	Status     string          `json:"status"`
@@ -72,10 +74,12 @@ type profileShowData struct {
 }
 
 type profileNormalizedData struct {
+	Kind     string `json:"kind"`
 	Backend  string `json:"backend"`
 	CNI      string `json:"cni"`
 	Masters  int    `json:"masters"`
 	Workers  int    `json:"workers"`
+	Count    int    `json:"count,omitempty"`
 	OSImage  string `json:"osImage"`
 	StateDir string `json:"stateDir"`
 }
@@ -176,6 +180,7 @@ func envListPayload(envs []*lab.Env) envListData {
 			Name:      env.Name,
 			Source:    "state",
 			StateDir:  filepath.Join("state", env.Name),
+			Kind:      env.Kind,
 			Backend:   env.Backend,
 			CNI:       env.CNI,
 			Status:    "present",
@@ -211,6 +216,7 @@ func envStatusPayload(root string, env *lab.Env) envStatusData {
 			Name: env.Name,
 			Path: resolvedProfilePath,
 		},
+		Kind:       env.Kind,
 		Backend:    env.Backend,
 		CNI:        env.CNI,
 		Status:     status,
@@ -254,10 +260,12 @@ func profileSource(path string) string {
 
 func profileNormalized(p *lab.Profile) profileNormalizedData {
 	return profileNormalizedData{
+		Kind:     p.KindOrDefault(),
 		Backend:  p.Backend,
 		CNI:      p.Kubernetes.CNI,
 		Masters:  p.VM.Masters,
 		Workers:  p.VM.Workers,
+		Count:    p.VM.Count,
 		OSImage:  p.VM.OSImage,
 		StateDir: p.State.Dir,
 	}

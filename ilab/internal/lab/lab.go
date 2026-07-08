@@ -44,6 +44,7 @@ func FindRoot() (string, error) {
 type Env struct {
 	Name       string
 	Root       string
+	Kind       string
 	Backend    string
 	CNI        string
 	NamePrefix string
@@ -138,6 +139,7 @@ func LoadEnv(root, name string) (*Env, error) {
 	return &Env{
 		Name:       name,
 		Root:       root,
+		Kind:       m["kind"],
 		Backend:    m["backend"],
 		CNI:        m["cni"],
 		NamePrefix: prefix,
@@ -201,6 +203,10 @@ func FindEnvForVM(root, vmName string) (*Env, error) {
 func resolveEnvForVMName(envs []*Env, vmName string) (*Env, error) {
 	var matches []*Env
 	for _, e := range envs {
+		if e.Kind == "single-vm" && vmName == e.Name {
+			matches = append(matches, e)
+			continue
+		}
 		if strings.HasPrefix(vmName, e.NamePrefix+"-") {
 			matches = append(matches, e)
 		}
@@ -240,6 +246,9 @@ func (e *Env) ListVMs() ([]VMInfo, error) {
 	case "multipass":
 		return listMultipassVMs(e.NamePrefix)
 	case "libvirt":
+		if e.Kind == "single-vm" {
+			return listLibvirtVMByName(e.Name)
+		}
 		return listLibvirtVMs(e.NamePrefix)
 	default:
 		return nil, fmt.Errorf("vm list not implemented for backend %q", e.Backend)
@@ -519,6 +528,19 @@ func listLibvirtVMs(prefix string) ([]VMInfo, error) {
 		vms = append(vms, VMInfo{Name: name, Backend: "libvirt", State: state, IPv4: ip})
 	}
 	return vms, nil
+}
+
+func listLibvirtVMByName(name string) ([]VMInfo, error) {
+	vms, err := listLibvirtVMs("")
+	if err != nil {
+		return nil, err
+	}
+	for _, vm := range vms {
+		if vm.Name == name {
+			return []VMInfo{vm}, nil
+		}
+	}
+	return nil, nil
 }
 
 // libvirtVMIP returns the first IPv4 address of a libvirt VM via DHCP lease lookup.

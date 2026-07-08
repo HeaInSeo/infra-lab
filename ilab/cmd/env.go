@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -31,6 +35,20 @@ var envStatusCmd = &cobra.Command{
 	Short: "Show cluster and VM status for an environment",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runEnvStatus,
+}
+
+var envInfoCmd = &cobra.Command{
+	Use:   "info <env-name>",
+	Short: "Show connection information for an environment",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runEnvInfo,
+}
+
+var envSSHCmd = &cobra.Command{
+	Use:   "ssh <env-name>",
+	Short: "Open an interactive shell for a single-VM environment",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runEnvSSH,
 }
 
 var envUseCmd = &cobra.Command{
@@ -81,6 +99,8 @@ var (
 func init() {
 	envCmd.AddCommand(envListCmd)
 	envCmd.AddCommand(envStatusCmd)
+	envCmd.AddCommand(envInfoCmd)
+	envCmd.AddCommand(envSSHCmd)
 	envCmd.AddCommand(envUseCmd)
 	envCmd.AddCommand(envPlanCmd)
 
@@ -127,14 +147,18 @@ func runEnvList(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ENV\tBACKEND\tCNI\tCREATED\tCOMMIT\tSTALE")
+	fmt.Fprintln(w, "ENV\tKIND\tBACKEND\tCNI\tCREATED\tCOMMIT\tSTALE")
 	for _, e := range envs {
 		stale := ""
 		if count, err := e.TerraformResourceCount(); err == nil && count == 0 {
 			stale = "yes"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			e.Name, e.Backend, e.CNI, e.CreatedAt, shortHash(e.GitCommit), stale)
+		kind := e.Kind
+		if kind == "" {
+			kind = "kubernetes"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			e.Name, kind, e.Backend, e.CNI, e.CreatedAt, shortHash(e.GitCommit), stale)
 	}
 	return w.Flush()
 }
@@ -216,6 +240,15 @@ func runEnvPlan(_ *cobra.Command, args []string) error {
 		"plan",
 		"-state", stateFile,
 	}
+	if p.KindOrDefault() == "single-vm" {
+		vars, err := singleVMTFVars(p)
+		if err != nil {
+			return err
+		}
+		for _, v := range vars {
+			tofuArgs = append(tofuArgs, "-var", v)
+		}
+	}
 
 	return runWithEnv(root, "tofu", tofuArgs, p.ToEnvVars(), backendDir)
 }
@@ -276,6 +309,9 @@ func runEnvUp(_ *cobra.Command, args []string) error {
 		}
 	}
 
+	if p.KindOrDefault() == "single-vm" {
+		return runSingleVMUp(root, p)
+	}
 	if err := runKToolWithProfile(root, p, "up"); err != nil {
 		return err
 	}
@@ -333,6 +369,9 @@ func runEnvDown(_ *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: state dir %s does not exist — environment may already be down\n", stateDir)
 	}
 
+	if p.KindOrDefault() == "single-vm" {
+		return runSingleVMDown(root, p)
+	}
 	return runKToolWithProfile(root, p, "down")
 }
 
@@ -359,8 +398,14 @@ func runEnvRebuild(_ *cobra.Command, args []string) error {
 
 	// Step 1: down.
 	fmt.Println("==> Step 1/3: env down")
-	if err := runKToolWithProfile(root, p, "down"); err != nil {
-		return fmt.Errorf("down failed: %w", err)
+	if p.KindOrDefault() == "single-vm" {
+		if err := runSingleVMDown(root, p); err != nil {
+			return fmt.Errorf("down failed: %w", err)
+		}
+	} else {
+		if err := runKToolWithProfile(root, p, "down"); err != nil {
+			return fmt.Errorf("down failed: %w", err)
+		}
 	}
 
 	// Step 2: remove state dir (save recovery files first).
@@ -373,12 +418,379 @@ func runEnvRebuild(_ *cobra.Command, args []string) error {
 
 	// Step 3: up.
 	fmt.Println("==> Step 3/3: env up")
-	if err := runKToolWithProfile(root, p, "up"); err != nil {
-		restoreRebuildRecoveryFiles(stateDir, recovery)
-		return fmt.Errorf("up failed: %w", err)
+	if p.KindOrDefault() == "single-vm" {
+		if err := runSingleVMUp(root, p); err != nil {
+			restoreRebuildRecoveryFiles(stateDir, recovery)
+			return fmt.Errorf("up failed: %w", err)
+		}
+	} else {
+		if err := runKToolWithProfile(root, p, "up"); err != nil {
+			restoreRebuildRecoveryFiles(stateDir, recovery)
+			return fmt.Errorf("up failed: %w", err)
+		}
 	}
 
 	return writeResolvedProfile(root, p)
+}
+
+type envInfoPayload struct {
+	Env       string           `json:"env"`
+	Kind      string           `json:"kind"`
+	Backend   string           `json:"backend"`
+	SSH       envInfoSSH       `json:"ssh"`
+	Workspace envInfoWorkspace `json:"workspace"`
+	VM        envInfoVM        `json:"vm"`
+}
+
+type envInfoSSH struct {
+	Host         string `json:"host"`
+	User         string `json:"user"`
+	Port         int    `json:"port"`
+	IdentityFile string `json:"identityFile"`
+}
+
+type envInfoWorkspace struct {
+	Path string `json:"path"`
+}
+
+type envInfoVM struct {
+	Name string `json:"name"`
+}
+
+func runEnvInfo(_ *cobra.Command, args []string) error {
+	root, err := lab.FindRoot()
+	if err != nil {
+		return err
+	}
+	p, err := loadResolvedProfile(root, args[0])
+	if err != nil {
+		return err
+	}
+	if p.KindOrDefault() != "single-vm" {
+		return fmt.Errorf("env info currently supports kind=single-vm only")
+	}
+	info, err := singleVMInfo(root, p)
+	if err != nil {
+		return err
+	}
+	if wantsJSON() {
+		return output.WriteJSON(os.Stdout, output.Success("env.info", info))
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "Env:\t%s\n", info.Env)
+	fmt.Fprintf(w, "VM:\t%s\n", info.VM.Name)
+	fmt.Fprintf(w, "SSH:\tssh -i %s -p %d %s@%s\n", info.SSH.IdentityFile, info.SSH.Port, info.SSH.User, info.SSH.Host)
+	fmt.Fprintf(w, "Workspace:\t%s\n", info.Workspace.Path)
+	return w.Flush()
+}
+
+func runEnvSSH(_ *cobra.Command, args []string) error {
+	root, err := lab.FindRoot()
+	if err != nil {
+		return err
+	}
+	p, err := loadResolvedProfile(root, args[0])
+	if err != nil {
+		return err
+	}
+	if p.KindOrDefault() != "single-vm" {
+		return fmt.Errorf("env ssh currently supports kind=single-vm only")
+	}
+	info, err := singleVMInfo(root, p)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("ssh",
+		"-i", lab.ExpandTilde(info.SSH.IdentityFile),
+		"-p", fmt.Sprintf("%d", info.SSH.Port),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		info.SSH.User+"@"+info.SSH.Host,
+	)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func runSingleVMUp(root string, p *lab.Profile) error {
+	if errs := p.Validate(); len(errs) > 0 {
+		return fmt.Errorf("profile validation failed: %s", strings.Join(errs, "; "))
+	}
+	stateDir := filepath.Join(root, p.State.Dir)
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+	backendDir := filepath.Join(root, "backends", "single-vm")
+	stateFile := filepath.Join(stateDir, "terraform.tfstate")
+	vars, err := singleVMTFVars(p)
+	if err != nil {
+		return err
+	}
+	if err := runWithEnv(root, "tofu", []string{"init", "-input=false"}, nil, backendDir); err != nil {
+		return err
+	}
+	args := []string{"apply", "-auto-approve", "-input=false", "-state", stateFile}
+	for _, v := range vars {
+		args = append(args, "-var", v)
+	}
+	if err := runWithEnv(root, "tofu", args, nil, backendDir); err != nil {
+		return err
+	}
+	if err := writeSingleVMMeta(root, p); err != nil {
+		return err
+	}
+	if err := writeResolvedProfile(root, p); err != nil {
+		return err
+	}
+	info, err := singleVMInfo(root, p)
+	if err != nil {
+		return err
+	}
+	if err := waitForSSH(info); err != nil {
+		return err
+	}
+	if err := copyBootstrapScripts(p, info); err != nil {
+		return err
+	}
+	fmt.Printf("single-vm environment %q is ready\n", p.EnvName())
+	return nil
+}
+
+func runSingleVMDown(root string, p *lab.Profile) error {
+	backendDir := filepath.Join(root, "backends", "single-vm")
+	stateFile := filepath.Join(root, p.State.Dir, "terraform.tfstate")
+	vars, err := singleVMTFVars(p)
+	if err != nil {
+		return err
+	}
+	if err := runWithEnv(root, "tofu", []string{"init", "-input=false"}, nil, backendDir); err != nil {
+		return err
+	}
+	args := []string{"destroy", "-auto-approve", "-input=false", "-state", stateFile}
+	for _, v := range vars {
+		args = append(args, "-var", v)
+	}
+	return runWithEnv(root, "tofu", args, nil, backendDir)
+}
+
+func singleVMTFVars(p *lab.Profile) ([]string, error) {
+	pub, err := os.ReadFile(lab.ExpandTilde(p.SSH.PrivateKeyPath) + ".pub")
+	if err != nil {
+		return nil, fmt.Errorf("read ssh public key: %w", err)
+	}
+	dirs, err := json.Marshal(p.Workspace.Dirs)
+	if err != nil {
+		return nil, err
+	}
+	vars := []string{
+		"env_name=" + p.EnvName(),
+		"vm_user=" + p.SSH.User,
+		fmt.Sprintf("vm_cpus=%d", p.VM.CPU),
+		"vm_memory=" + p.VM.Memory,
+		"vm_disk=" + p.VM.Disk,
+		"workspace_path=" + p.Workspace.Path,
+		"workspace_dirs=" + string(dirs),
+		"libvirt_base_image_url=" + p.VM.ImageURL,
+		"libvirt_base_image_name=" + strings.ReplaceAll(p.VM.OSImage, ".", "-") + "-base.qcow2",
+		"ssh_public_key=" + strings.TrimSpace(string(pub)),
+	}
+	if p.Libvirt != nil {
+		vars = append(vars,
+			"libvirt_pool_name="+p.Libvirt.PoolName,
+			"libvirt_pool_path="+p.Libvirt.PoolPath,
+		)
+	}
+	return vars, nil
+}
+
+func writeSingleVMMeta(root string, p *lab.Profile) error {
+	stateDir := filepath.Join(root, p.State.Dir)
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return err
+	}
+	content := strings.Join([]string{
+		"env_name=" + p.EnvName(),
+		"kind=" + p.KindOrDefault(),
+		"backend=" + p.Backend,
+		"cni=",
+		"name_prefix=" + p.EnvName(),
+		"infra_lab_git_commit=" + gitHead(root),
+		"infra_lab_git_branch=" + gitBranch(root),
+		"created_at=" + time.Now().UTC().Format(time.RFC3339),
+		"",
+	}, "\n")
+	return os.WriteFile(filepath.Join(stateDir, "meta"), []byte(content), 0644)
+}
+
+func loadResolvedProfile(root, envName string) (*lab.Profile, error) {
+	path := filepath.Join(root, "state", envName, "resolved-profile.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read resolved profile for %q: %w", envName, err)
+	}
+	var record resolvedProfileOnDisk
+	if err := yaml.Unmarshal(data, &record); err != nil {
+		return nil, fmt.Errorf("parse resolved profile for %q: %w", envName, err)
+	}
+	if record.Profile == nil {
+		return nil, fmt.Errorf("resolved profile for %q is empty", envName)
+	}
+	return record.Profile, nil
+}
+
+func singleVMInfo(root string, p *lab.Profile) (envInfoPayload, error) {
+	host := singleVMOutput(root, p, "ipv4")
+	if host == "" {
+		host = libvirtDomainIP(p.EnvName())
+	}
+	if host == "" {
+		return envInfoPayload{}, fmt.Errorf("could not determine IP for %q", p.EnvName())
+	}
+	return envInfoPayload{
+		Env:     p.EnvName(),
+		Kind:    p.KindOrDefault(),
+		Backend: p.Backend,
+		SSH: envInfoSSH{
+			Host:         host,
+			User:         p.SSH.User,
+			Port:         22,
+			IdentityFile: p.SSH.PrivateKeyPath,
+		},
+		Workspace: envInfoWorkspace{Path: p.Workspace.Path},
+		VM:        envInfoVM{Name: p.EnvName()},
+	}, nil
+}
+
+func singleVMOutput(root string, p *lab.Profile, name string) string {
+	stateFile := filepath.Join(root, p.State.Dir, "terraform.tfstate")
+	backendDir := filepath.Join(root, "backends", "single-vm")
+	out, err := exec.Command("tofu", "-chdir="+backendDir, "output", "-raw", "-state", stateFile, name).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func libvirtDomainIP(name string) string {
+	out, err := exec.Command("virsh", "-c", "qemu:///system", "domifaddr", name).Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, "ipv4") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		addr, _, _ := strings.Cut(fields[3], "/")
+		if addr != "" {
+			return addr
+		}
+	}
+	return ""
+}
+
+func waitForSSH(info envInfoPayload) error {
+	addr := info.SSH.User + "@" + info.SSH.Host
+	for i := 0; i < 60; i++ {
+		cmd := exec.Command("ssh",
+			"-i", lab.ExpandTilde(info.SSH.IdentityFile),
+			"-p", fmt.Sprintf("%d", info.SSH.Port),
+			"-o", "BatchMode=yes",
+			"-o", "ConnectTimeout=5",
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "UserKnownHostsFile=/dev/null",
+			addr,
+			"true",
+		)
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+		time.Sleep(5 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for SSH on %s", addr)
+}
+
+func copyBootstrapScripts(p *lab.Profile, info envInfoPayload) error {
+	if len(p.Bootstrap.Scripts) == 0 {
+		return nil
+	}
+	scriptsDir := strings.TrimRight(info.Workspace.Path, "/") + "/scripts"
+	if err := runSSH(info, "mkdir -p "+shellQuote(scriptsDir)); err != nil {
+		return fmt.Errorf("create remote scripts dir: %w", err)
+	}
+	for _, script := range p.Bootstrap.Scripts {
+		local, err := resolveProfileRelativePath(p, script)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(local)
+		if err != nil {
+			return fmt.Errorf("read bootstrap script %s: %w", local, err)
+		}
+		remote := scriptsDir + "/" + filepath.Base(script)
+		if err := runSSHWithStdin(info, "cat > "+shellQuote(remote), bytes.NewReader(data)); err != nil {
+			return fmt.Errorf("copy bootstrap script %s: %w", script, err)
+		}
+		if err := runSSH(info, "chmod +x "+shellQuote(remote)); err != nil {
+			return fmt.Errorf("chmod bootstrap script %s: %w", script, err)
+		}
+	}
+	return nil
+}
+
+func resolveProfileRelativePath(p *lab.Profile, path string) (string, error) {
+	if filepath.IsAbs(path) {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+		return "", fmt.Errorf("bootstrap script not found: %s", path)
+	}
+	candidates := []string{path}
+	if p.SourcePath != "" {
+		dir := filepath.Dir(p.SourcePath)
+		for {
+			candidates = append(candidates, filepath.Join(dir, path))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("bootstrap script %q not found", path)
+}
+
+func runSSH(info envInfoPayload, remoteCmd string) error {
+	return runSSHWithStdin(info, remoteCmd, nil)
+}
+
+func runSSHWithStdin(info envInfoPayload, remoteCmd string, stdin io.Reader) error {
+	cmd := exec.Command("ssh",
+		"-i", lab.ExpandTilde(info.SSH.IdentityFile),
+		"-p", fmt.Sprintf("%d", info.SSH.Port),
+		"-o", "BatchMode=yes",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		info.SSH.User+"@"+info.SSH.Host,
+		remoteCmd,
+	)
+	cmd.Stdin = stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 type rebuildRecovery struct {
@@ -456,7 +868,11 @@ func runWithEnv(root, name string, args []string, extraEnv map[string]string, di
 // resolveBackendDir returns the path to the backend Terraform directory.
 // Mirrors k8s-tool.sh backend_dir logic.
 func resolveBackendDir(root string, p *lab.Profile) (string, error) {
-	dir := filepath.Join(root, "backends", p.Backend)
+	backend := p.Backend
+	if p.KindOrDefault() == "single-vm" {
+		backend = "single-vm"
+	}
+	dir := filepath.Join(root, "backends", backend)
 	if _, err := os.Stat(dir); err != nil {
 		return "", fmt.Errorf("backend dir not found: %s", dir)
 	}
@@ -508,4 +924,12 @@ func gitHead(root string) string {
 		h = h[:len(h)-1]
 	}
 	return h
+}
+
+func gitBranch(root string) string {
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
 }
