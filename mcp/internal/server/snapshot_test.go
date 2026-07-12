@@ -66,8 +66,28 @@ func TestCollectSnapshotUnknownRiskWhenAllEvidenceFails(t *testing.T) {
 	if env.Data.Health.Risk != "UNKNOWN" {
 		t.Fatalf("risk = %q, want UNKNOWN", env.Data.Health.Risk)
 	}
-	if len(env.Data.Findings) != 3 {
-		t.Fatalf("findings len = %d, want 3", len(env.Data.Findings))
+	if len(env.Data.Findings) != 4 {
+		t.Fatalf("findings len = %d, want 4", len(env.Data.Findings))
+	}
+}
+
+func TestCollectSnapshotIncludesDoctorFindings(t *testing.T) {
+	raw, err := collectSnapshotWithRunner("snapshot.collect", "", time.Second, func(args []string, _ time.Duration) (string, bool, error) {
+		if reflect.DeepEqual(args, []string{"doctor"}) {
+			return `{"ok":true,"command":"doctor","contractVersion":"infra-lab.contract/v1","data":{"findings":[{"code":"LIBVIRT_VM_PAUSED","message":"vm paused"}]},"warnings":[],"errors":[]}` + "\n", false, nil
+		}
+		return okEnvelope(commandName(args)), false, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env := decodeSnapshot(t, raw)
+	if len(env.Data.Findings) == 0 || env.Data.Findings[0].Code != "LIBVIRT_VM_PAUSED" {
+		t.Fatalf("findings = %#v, want doctor finding", env.Data.Findings)
+	}
+	if env.Data.Health.Risk != "MEDIUM" {
+		t.Fatalf("risk = %q, want MEDIUM", env.Data.Health.Risk)
 	}
 }
 

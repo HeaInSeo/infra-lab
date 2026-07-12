@@ -252,6 +252,12 @@ func doctorPayload(root string) doctorData {
 			State:   vm.State,
 			IPv4:    vm.IPv4,
 		})
+		for _, finding := range lab.DiagnoseLibvirtVM(vm) {
+			findings = append(findings, doctorFindingData{
+				Code:    finding.Code,
+				Message: finding.Message,
+			})
+		}
 	}
 
 	risk := "LOW"
@@ -267,6 +273,10 @@ func doctorPayload(root string) doctorData {
 		risk = "MEDIUM"
 		summary = "Doctor found non-blocking findings"
 	}
+	if hasHighRiskFinding(findings) {
+		risk = "HIGH"
+		summary = "Doctor found VM or host storage findings requiring attention"
+	}
 
 	return doctorData{
 		Root:          root,
@@ -277,4 +287,14 @@ func doctorPayload(root string) doctorData {
 		Health:        doctorHealthData{Risk: risk, Summary: summary},
 		Findings:      findings,
 	}
+}
+
+func hasHighRiskFinding(findings []doctorFindingData) bool {
+	for _, finding := range findings {
+		switch finding.Code {
+		case "LIBVIRT_VM_PAUSED", "LIBVIRT_IO_ERROR", "HOST_NOSPACE":
+			return true
+		}
+	}
+	return false
 }

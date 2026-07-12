@@ -40,6 +40,7 @@ type snapshotHealth struct {
 }
 
 type snapshotEvidence struct {
+	Doctor    json.RawMessage `json:"doctor,omitempty"`
 	EnvStatus json.RawMessage `json:"envStatus,omitempty"`
 	VMs       json.RawMessage `json:"vms,omitempty"`
 	K8s       json.RawMessage `json:"k8s,omitempty"`
@@ -60,6 +61,16 @@ func collectSnapshotWithRunner(command, env string, timeout time.Duration, runne
 	findings := []snapshotFinding{}
 	warnings := []snapshotWarning{}
 	evidence := snapshotEvidence{}
+
+	if raw, isErr, err := runner([]string{"doctor"}, timeout); err != nil {
+		findings = append(findings, snapshotFinding{Code: "DOCTOR_FAILED", Message: err.Error()})
+	} else {
+		evidence.Doctor = json.RawMessage(raw)
+		if isErr {
+			findings = append(findings, snapshotFinding{Code: "DOCTOR_ERROR", Message: "doctor returned ok:false"})
+		}
+		findings = append(findings, doctorFindings(raw)...)
+	}
 
 	envArgs := []string{"env", "status"}
 	if env != "" {
@@ -129,4 +140,17 @@ func collectSnapshotWithRunner(command, env string, timeout time.Duration, runne
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+func doctorFindings(raw string) []snapshotFinding {
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Findings []snapshotFinding `json:"findings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &env); err != nil || !env.OK {
+		return nil
+	}
+	return env.Data.Findings
 }
