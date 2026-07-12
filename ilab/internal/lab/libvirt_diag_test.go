@@ -12,6 +12,7 @@ func TestParseLibvirtBlockErrors(t *testing.T) {
 		want []string
 	}{
 		{name: "none", in: "No errors found\n", want: nil},
+		{name: "none korean", in: "오류 메세지를 찾을 수 없음\n", want: nil},
 		{name: "single", in: "vda: no space\n", want: []string{"vda: no space"}},
 		{name: "multiple", in: "\nvda: no space\nvdb: read failed\n", want: []string{"vda: no space", "vdb: read failed"}},
 	}

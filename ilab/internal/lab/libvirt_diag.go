@@ -90,7 +90,10 @@ func ParseLibvirtBlockErrors(out string) []string {
 			continue
 		}
 		lower := strings.ToLower(line)
-		if strings.Contains(lower, "no errors") || strings.Contains(lower, "no error") {
+		if strings.Contains(lower, "no errors") ||
+			strings.Contains(lower, "no error") ||
+			strings.Contains(line, "오류 메세지를 찾을 수 없음") ||
+			strings.Contains(line, "오류 메시지를 찾을 수 없음") {
 			continue
 		}
 		errors = append(errors, line)
