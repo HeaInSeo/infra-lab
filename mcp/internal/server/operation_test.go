@@ -96,7 +96,7 @@ func TestOperationToolsRegisteredWithRequiredCapabilities(t *testing.T) {
 	handlers := readOnlyTools(bootstrapInfo{
 		InfraLabVersion: "dev",
 		ContractVersion: supportedContractVersion,
-		Capabilities:    map[string]bool{"env.status.v1": true, "profile.validate.v1": true, "vm.list.v1": true},
+		Capabilities:    map[string]bool{"doctor.v1": true, "env.status.v1": true, "profile.validate.v1": true, "vm.list.v1": true},
 	})
 	for _, name := range []string{
 		"addon_install_prepare",
@@ -119,6 +119,8 @@ func TestOperationToolsRegisteredWithRequiredCapabilities(t *testing.T) {
 		"addon_uninstall_commit",
 		"libvirt_vm_resume_prepare",
 		"libvirt_vm_resume_commit",
+		"container_image_build_push_prepare",
+		"container_image_build_push_commit",
 	} {
 		if _, ok := handlers[name]; !ok {
 			t.Fatalf("expected %s to be registered", name)
@@ -256,5 +258,49 @@ func TestAuditTargetIncludesVM(t *testing.T) {
 	})
 	if target["env"] != "ebpf-dev" || target["vm"] != "ebpf-dev" {
 		t.Fatalf("unexpected audit target: %#v", target)
+	}
+}
+
+func TestValidateImageReference(t *testing.T) {
+	for _, image := range []string{
+		"harbor.lab.local/nodevault/controlplane:v1",
+		"localhost:5000/library/test:latest",
+		"ghcr.io/heainseo/nodevault/controlplane:20260712",
+	} {
+		if err := validateImageReference(image); err != nil {
+			t.Fatalf("expected %q to be valid: %v", image, err)
+		}
+	}
+	for _, image := range []string{
+		"nodevault/controlplane:latest",
+		"harbor.lab.local/nodevault/controlplane",
+		"harbor.lab.local/nodevault/controlplane@sha256:deadbeef",
+		"https://harbor.lab.local/nodevault/controlplane:latest",
+		"harbor.lab.local/nodevault/control plane:latest",
+	} {
+		if err := validateImageReference(image); err == nil {
+			t.Fatalf("expected %q to be invalid", image)
+		}
+	}
+}
+
+func TestResolveBuildDockerfileRejectsOutsideContext(t *testing.T) {
+	tmp := t.TempDir()
+	contextDir := filepath.Join(tmp, "context")
+	if err := os.MkdirAll(contextDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM scratch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveBuildDockerfile(contextDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != filepath.Join(contextDir, "Dockerfile") {
+		t.Fatalf("dockerfile = %q", got)
+	}
+	if _, err := resolveBuildDockerfile(contextDir, "../Dockerfile"); err == nil {
+		t.Fatal("expected dockerfile outside context to be rejected")
 	}
 }

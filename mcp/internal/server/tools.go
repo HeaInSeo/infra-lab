@@ -65,6 +65,14 @@ type libvirtVMResumePrepareArg struct {
 	VM  string `json:"vm"`
 }
 
+type containerImageBuildPushPrepareArg struct {
+	Name       string `json:"name"`
+	ContextDir string `json:"contextDir"`
+	Dockerfile string `json:"dockerfile,omitempty"`
+	Image      string `json:"image"`
+	Builder    string `json:"builder,omitempty"`
+}
+
 type envUpPrepareArg struct {
 	Profile string `json:"profile"`
 	Env     string `json:"env,omitempty"`
@@ -154,6 +162,8 @@ func readOnlyTools(info bootstrapInfo) map[string]toolHandler {
 	addSynthetic([]string{"env.status.v1"}, "addon_uninstall_commit", "Commit a prepared addon uninstall operation after approval.", addonCommitSchema(), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructiveCommitArgs("addon_uninstall_commit"), 15*time.Minute)
 	addSynthetic([]string{"env.status.v1", "vm.list.v1"}, "libvirt_vm_resume_prepare", "Prepare an approved libvirt VM resume operation.", libvirtVMResumePrepareSchema(), syntheticToolMeta("approved_mutation", "HIGH", false, true, "Stage 8"), libvirtVMResumePrepareArgs(), 30*time.Second)
 	addSynthetic([]string{"env.status.v1", "vm.list.v1"}, "libvirt_vm_resume_commit", "Commit a prepared libvirt VM resume operation after approval.", addonCommitSchema(), syntheticToolMeta("approved_mutation", "HIGH", false, true, "Stage 8"), libvirtVMResumeCommitArgs(), 2*time.Minute)
+	addSynthetic([]string{"doctor.v1"}, "container_image_build_push_prepare", "Prepare an approved container image build and registry push operation.", containerImageBuildPushPrepareSchema(), syntheticToolMeta("approved_mutation", "HIGH", false, true, "Stage 9"), containerImageBuildPushPrepareArgs(), 30*time.Second)
+	addSynthetic([]string{"doctor.v1"}, "container_image_build_push_commit", "Commit a prepared container image build and registry push operation after approval.", addonCommitSchema(), syntheticToolMeta("approved_mutation", "HIGH", false, true, "Stage 9"), containerImageBuildPushCommitArgs(), 30*time.Minute)
 	if capabilities["version.v1"] && capabilities["capabilities.v1"] {
 		addToolCatalog(handlers)
 	}
@@ -304,6 +314,55 @@ func libvirtVMResumeCommitArgs() func(json.RawMessage) ([]string, error) {
 			return nil, fmt.Errorf("operationId is required")
 		}
 		out := []string{"__operation__", "libvirt_vm_resume_commit", "operationId=" + parsed.OperationID}
+		if parsed.ApprovalToken != "" {
+			out = append(out, "approvalToken="+parsed.ApprovalToken)
+		}
+		return out, nil
+	}
+}
+
+func containerImageBuildPushPrepareArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed containerImageBuildPushPrepareArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.Name == "" {
+			return nil, fmt.Errorf("name is required")
+		}
+		if parsed.ContextDir == "" {
+			return nil, fmt.Errorf("contextDir is required")
+		}
+		if parsed.Image == "" {
+			return nil, fmt.Errorf("image is required")
+		}
+		out := []string{
+			"__operation__",
+			"container_image_build_push_prepare",
+			"name=" + parsed.Name,
+			"contextDir=" + parsed.ContextDir,
+			"image=" + parsed.Image,
+		}
+		if parsed.Dockerfile != "" {
+			out = append(out, "dockerfile="+parsed.Dockerfile)
+		}
+		if parsed.Builder != "" {
+			out = append(out, "builder="+parsed.Builder)
+		}
+		return out, nil
+	}
+}
+
+func containerImageBuildPushCommitArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed addonCommitArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.OperationID == "" {
+			return nil, fmt.Errorf("operationId is required")
+		}
+		out := []string{"__operation__", "container_image_build_push_commit", "operationId=" + parsed.OperationID}
 		if parsed.ApprovalToken != "" {
 			out = append(out, "approvalToken="+parsed.ApprovalToken)
 		}
@@ -705,6 +764,21 @@ func libvirtVMResumePrepareSchema() map[string]any {
 			"vm":  map[string]any{"type": "string"},
 		},
 		"required":             []string{"env", "vm"},
+		"additionalProperties": false,
+	}
+}
+
+func containerImageBuildPushPrepareSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name":       map[string]any{"type": "string", "description": "Stable operation target name, for example nodevault-controlplane."},
+			"contextDir": map[string]any{"type": "string", "description": "Absolute or infra-lab-relative build context directory under an allowed build root."},
+			"dockerfile": map[string]any{"type": "string", "description": "Dockerfile path relative to contextDir, default Dockerfile."},
+			"image":      map[string]any{"type": "string", "description": "Full registry image reference including tag."},
+			"builder":    map[string]any{"type": "string", "enum": []string{"podman", "docker"}},
+		},
+		"required":             []string{"name", "contextDir", "image"},
 		"additionalProperties": false,
 	}
 }

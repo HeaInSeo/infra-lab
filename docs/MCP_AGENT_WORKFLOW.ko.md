@@ -119,6 +119,7 @@ env_clean_prepare
 env_rebuild_prepare
 addon_uninstall_prepare
 libvirt_vm_resume_prepare
+container_image_build_push_prepare
 ```
 
 prepare 후 확인:
@@ -155,6 +156,7 @@ env_clean_commit
 env_rebuild_commit
 addon_uninstall_commit
 libvirt_vm_resume_commit
+container_image_build_push_commit
 ```
 
 `operation_approve` 이후에는 `operationId`만으로 commit할 수 있다.
@@ -175,6 +177,15 @@ libvirt paused VM 복구:
 - doctor/collect_snapshot에서 LIBVIRT_VM_PAUSED, LIBVIRT_IO_ERROR, HOST_NOSPACE 근거를 확인한다.
 - storage pressure나 block I/O 원인을 먼저 해소한다.
 - libvirt_vm_resume_prepare → operation_approve → libvirt_vm_resume_commit 순서로 실행한다.
+```
+
+컨테이너 이미지 build/push:
+
+```text
+- raw docker/podman 명령을 agent가 직접 실행하지 않는다.
+- container_image_build_push_prepare에서 contextDir, dockerfile, image, sourceDigest를 확인한다.
+- operation_approve 후 container_image_build_push_commit으로 build/push를 수행한다.
+- 실패 시 operation_logs로 builder stdout/stderr를 확인한다.
 ```
 
 ## 6. 실패 처리

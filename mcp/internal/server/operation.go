@@ -46,6 +46,12 @@ type operationRecord struct {
 type operationTarget struct {
 	Env               string `json:"env"`
 	VM                string `json:"vm,omitempty"`
+	Name              string `json:"name,omitempty"`
+	ContextDir        string `json:"contextDir,omitempty"`
+	Dockerfile        string `json:"dockerfile,omitempty"`
+	Image             string `json:"image,omitempty"`
+	Builder           string `json:"builder,omitempty"`
+	SourceDigest      string `json:"sourceDigest,omitempty"`
 	Addon             string `json:"addon,omitempty"`
 	Profile           string `json:"profile,omitempty"`
 	ProfileDigest     string `json:"profileDigest,omitempty"`
@@ -151,6 +157,10 @@ func handleOperation(args []string, timeout time.Duration) (string, error) {
 		return prepareLibvirtVMResume(fields)
 	case "libvirt_vm_resume_commit":
 		return commitLibvirtVMResume(fields, timeout)
+	case "container_image_build_push_prepare":
+		return prepareContainerImageBuildPush(fields)
+	case "container_image_build_push_commit":
+		return commitContainerImageBuildPush(fields, timeout)
 	case "status":
 		return operationStatus(fields["operationId"])
 	case "logs":
@@ -321,6 +331,357 @@ func validateLibvirtVMTargetFromList(raw, env, vm string) error {
 		}
 	}
 	return fmt.Errorf("VM_NOT_MANAGED_BY_ENV: vm %q is not a managed libvirt VM in env %q", vm, env)
+}
+
+func prepareContainerImageBuildPush(fields map[string]string) (string, error) {
+	target, err := resolveContainerImageBuildTarget(fields)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	op := operationRecord{
+		OperationID: operationID("container_image_build_push"),
+		Tool:        "container_image_build_push",
+		Status:      "PREPARED",
+		Risk:        "HIGH",
+		Destructive: false,
+		Target:      target,
+		CreatedAt:   now.Format(time.RFC3339),
+		ExpiresAt:   now.Add(1 * time.Hour).Format(time.RFC3339),
+		Approval: operationApproval{
+			Required: true,
+			Status:   "required",
+			Mode:     "token-v1",
+		},
+		Steps: []operationStep{
+			{Name: "validate image target", Status: "pending"},
+			{Name: "build container image", Status: "pending"},
+			{Name: "push container image", Status: "pending"},
+		},
+	}
+	token, err := approvalToken(op)
+	if err != nil {
+		return "", err
+	}
+	op.Approval.TokenHint = token[:min(18, len(token))]
+	path, err := writeOperation(op)
+	if err != nil {
+		return "", err
+	}
+	data := operationPrepareData{
+		OperationID:       op.OperationID,
+		ApprovalToken:     token,
+		ExpiresAt:         op.ExpiresAt,
+		PlanFingerprint:   digest("plan", "container_image_build_push", target.Name, target.Image, target.SourceDigest),
+		TargetFingerprint: target.TargetFingerprint,
+		Approval:          op.Approval,
+		Risk:              op.Risk,
+		Target:            op.Target,
+		Steps:             []string{"validate image target", "build container image", "push container image"},
+		Operation:         op,
+		OperationPath:     path,
+		Warnings: []map[string]string{{
+			"code":    "REGISTRY_PUSH_MUTATES_REMOTE_STATE",
+			"message": "commit builds from the approved source fingerprint and pushes the image tag to the registry",
+		}},
+	}
+	return encodeOperationEnvelope("container.image.build_push.prepare", data)
+}
+
+func commitContainerImageBuildPush(fields map[string]string, timeout time.Duration) (string, error) {
+	op, err := verifyPreparedOperation(fields, "container_image_build_push")
+	if err != nil {
+		return "", err
+	}
+	target, err := resolveContainerImageBuildTarget(map[string]string{
+		"name":       op.Target.Name,
+		"contextDir": op.Target.ContextDir,
+		"dockerfile": op.Target.Dockerfile,
+		"image":      op.Target.Image,
+		"builder":    op.Target.Builder,
+	})
+	if err != nil {
+		return "", err
+	}
+	if target.SourceDigest != op.Target.SourceDigest {
+		return "", fmt.Errorf("SOURCE_CHANGED: prepared source digest %s, current source digest %s", op.Target.SourceDigest, target.SourceDigest)
+	}
+	release, err := acquireNamedLock("image-"+target.Name, op)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	if _, err := appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        "container_image_build_push_commit",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      auditTarget(op),
+		Result:      "started",
+	}); err != nil {
+		return "", fmt.Errorf("AUDIT_WRITE_FAILED: %w", err)
+	}
+
+	op.Status = "RUNNING"
+	op.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	op.Approval.Status = "approved"
+	markStep(&op, "validate image target", "succeeded")
+	markStep(&op, "build container image", "running")
+	_, _ = writeOperation(op)
+	dockerfileRel, err := filepath.Rel(op.Target.ContextDir, op.Target.Dockerfile)
+	if err != nil {
+		return failOperation(op, "COMMAND_FAILED", err, "build container image")
+	}
+	if err := runLoggedCommand(op, timeout, op.Target.Builder, "build", "-f", dockerfileRel, "-t", op.Target.Image, op.Target.ContextDir); err != nil {
+		return failOperation(op, "COMMAND_FAILED", err, "build container image")
+	}
+	markStep(&op, "build container image", "succeeded")
+	markStep(&op, "push container image", "running")
+	_, _ = writeOperation(op)
+	if err := runLoggedCommand(op, timeout, op.Target.Builder, "push", op.Target.Image); err != nil {
+		return failOperation(op, "COMMAND_FAILED", err, "push container image")
+	}
+	markStep(&op, "push container image", "succeeded")
+	op.Status = "SUCCEEDED"
+	op.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	_, _ = writeOperation(op)
+	_, _ = appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        "container_image_build_push_commit",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      auditTarget(op),
+		Result:      "ok",
+	})
+	return encodeOperationEnvelope("container.image.build_push.commit", op)
+}
+
+func resolveContainerImageBuildTarget(fields map[string]string) (operationTarget, error) {
+	name := fields["name"]
+	contextDir := fields["contextDir"]
+	dockerfile := fields["dockerfile"]
+	image := fields["image"]
+	builder := fields["builder"]
+	if name == "" || contextDir == "" || image == "" {
+		return operationTarget{}, fmt.Errorf("name, contextDir, and image are required")
+	}
+	if err := validateTokenPart(name); err != nil {
+		return operationTarget{}, err
+	}
+	if err := validateImageReference(image); err != nil {
+		return operationTarget{}, err
+	}
+	resolvedBuilder, err := resolveImageBuilder(builder)
+	if err != nil {
+		return operationTarget{}, err
+	}
+	resolvedContext, err := resolveAllowedBuildContext(contextDir)
+	if err != nil {
+		return operationTarget{}, err
+	}
+	resolvedDockerfile, err := resolveBuildDockerfile(resolvedContext, dockerfile)
+	if err != nil {
+		return operationTarget{}, err
+	}
+	sourceDigest, err := containerImageSourceDigest(resolvedContext, resolvedDockerfile)
+	if err != nil {
+		return operationTarget{}, err
+	}
+	return operationTarget{
+		Name:              name,
+		ContextDir:        resolvedContext,
+		Dockerfile:        resolvedDockerfile,
+		Image:             image,
+		Builder:           resolvedBuilder,
+		SourceDigest:      sourceDigest,
+		TargetFingerprint: digest("container_image_build_push", name, resolvedContext, resolvedDockerfile, image, resolvedBuilder, sourceDigest),
+	}, nil
+}
+
+func resolveImageBuilder(builder string) (string, error) {
+	switch builder {
+	case "":
+		for _, candidate := range []string{"podman", "docker"} {
+			if _, err := exec.LookPath(candidate); err == nil {
+				return candidate, nil
+			}
+		}
+		return "", fmt.Errorf("NO_CONTAINER_BUILDER: podman or docker is required")
+	case "podman", "docker":
+		if _, err := exec.LookPath(builder); err != nil {
+			return "", fmt.Errorf("CONTAINER_BUILDER_NOT_FOUND: %s", builder)
+		}
+		return builder, nil
+	default:
+		return "", fmt.Errorf("unsupported builder: %s", builder)
+	}
+}
+
+func validateImageReference(image string) error {
+	if strings.TrimSpace(image) != image || image == "" {
+		return fmt.Errorf("invalid image reference: %q", image)
+	}
+	if strings.Contains(image, "://") || strings.Contains(image, "@") {
+		return fmt.Errorf("invalid image reference: %q", image)
+	}
+	for _, r := range image {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			continue
+		}
+		switch r {
+		case '.', '_', '-', '/', ':':
+			continue
+		default:
+			return fmt.Errorf("invalid image reference: %q", image)
+		}
+	}
+	firstSlash := strings.IndexByte(image, '/')
+	if firstSlash <= 0 {
+		return fmt.Errorf("IMAGE_REQUIRES_REGISTRY: %q", image)
+	}
+	registry := image[:firstSlash]
+	if !strings.Contains(registry, ".") && !strings.Contains(registry, ":") && registry != "localhost" {
+		return fmt.Errorf("IMAGE_REQUIRES_REGISTRY: %q", image)
+	}
+	tagIndex := strings.LastIndexByte(image, ':')
+	if tagIndex <= firstSlash || tagIndex == len(image)-1 {
+		return fmt.Errorf("IMAGE_REQUIRES_TAG: %q", image)
+	}
+	if strings.Contains(image[firstSlash+1:tagIndex], "//") {
+		return fmt.Errorf("invalid image reference: %q", image)
+	}
+	return nil
+}
+
+func resolveAllowedBuildContext(contextDir string) (string, error) {
+	root, err := infraLabRoot()
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(contextDir) {
+		contextDir = filepath.Join(root, contextDir)
+	}
+	absContext, err := filepath.Abs(contextDir)
+	if err != nil {
+		return "", err
+	}
+	resolvedContext, err := filepath.EvalSymlinks(absContext)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(resolvedContext)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("CONTEXT_NOT_DIRECTORY: %s", resolvedContext)
+	}
+	roots, err := imageBuildAllowedRoots(root)
+	if err != nil {
+		return "", err
+	}
+	for _, allowed := range roots {
+		if isPathWithin(allowed, resolvedContext) {
+			return resolvedContext, nil
+		}
+	}
+	return "", fmt.Errorf("CONTEXT_OUTSIDE_ALLOWED_ROOTS: %s", resolvedContext)
+}
+
+func imageBuildAllowedRoots(root string) ([]string, error) {
+	raw := os.Getenv("INFRA_LAB_IMAGE_BUILD_ROOTS")
+	candidates := []string{}
+	if raw == "" {
+		candidates = append(candidates, filepath.Dir(root))
+	} else {
+		candidates = filepath.SplitList(raw)
+	}
+	roots := []string{}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		abs, err := filepath.Abs(candidate)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return nil, err
+		}
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("ALLOWED_ROOT_NOT_DIRECTORY: %s", resolved)
+		}
+		roots = append(roots, resolved)
+	}
+	return roots, nil
+}
+
+func resolveBuildDockerfile(contextDir, dockerfile string) (string, error) {
+	if dockerfile == "" {
+		dockerfile = "Dockerfile"
+	}
+	if filepath.IsAbs(dockerfile) {
+		return "", fmt.Errorf("dockerfile must be relative to contextDir")
+	}
+	if strings.ContainsAny(dockerfile, `\`) {
+		return "", fmt.Errorf("invalid dockerfile path: %q", dockerfile)
+	}
+	path := filepath.Clean(filepath.Join(contextDir, dockerfile))
+	if !isPathWithin(contextDir, path) {
+		return "", fmt.Errorf("DOCKERFILE_OUTSIDE_CONTEXT: %s", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("DOCKERFILE_IS_DIRECTORY: %s", path)
+	}
+	return path, nil
+}
+
+func isPathWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != "" && rel != ".." && !strings.HasPrefix(rel, "../"))
+}
+
+func containerImageSourceDigest(contextDir, dockerfile string) (string, error) {
+	gitRoot, gitErr := commandOutput("git", "-C", contextDir, "rev-parse", "--show-toplevel")
+	if gitErr == nil {
+		head, err := commandOutput("git", "-C", contextDir, "rev-parse", "HEAD")
+		if err != nil {
+			return "", err
+		}
+		status, err := commandOutput("git", "-C", contextDir, "status", "--porcelain=v1")
+		if err != nil {
+			return "", err
+		}
+		return digest("git", strings.TrimSpace(gitRoot), strings.TrimSpace(head), status), nil
+	}
+	info, err := os.Stat(dockerfile)
+	if err != nil {
+		return "", err
+	}
+	return digest("file", dockerfile, info.ModTime().UTC().Format(time.RFC3339Nano), fmt.Sprintf("%d", info.Size())), nil
+}
+
+func commandOutput(command string, args ...string) (string, error) {
+	cmd := exec.Command(command, args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 func prepareDestructive(action string, fields map[string]string) (string, error) {
@@ -1183,6 +1544,16 @@ func operationStoreDir() (string, error) {
 }
 
 func acquireEnvLock(op operationRecord) (func(), error) {
+	if op.Target.Env == "" {
+		return nil, fmt.Errorf("env is required for env lock")
+	}
+	return acquireNamedLock(op.Target.Env, op)
+}
+
+func acquireNamedLock(name string, op operationRecord) (func(), error) {
+	if err := validateTokenPart(name); err != nil {
+		return nil, err
+	}
 	dir, err := lockDir()
 	if err != nil {
 		return nil, err
@@ -1190,11 +1561,11 @@ func acquireEnvLock(op operationRecord) (func(), error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, op.Target.Env+".lock")
+	path := filepath.Join(dir, name+".lock")
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	if err != nil {
 		if os.IsExist(err) {
-			return nil, fmt.Errorf("LOCK_HELD: %s", op.Target.Env)
+			return nil, fmt.Errorf("LOCK_HELD: %s", name)
 		}
 		return nil, err
 	}
@@ -1205,6 +1576,12 @@ func acquireEnvLock(op operationRecord) (func(), error) {
 		"startedAt":   time.Now().UTC().Format(time.RFC3339),
 		"expiresAt":   time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339),
 		"pid":         os.Getpid(),
+	}
+	if op.Target.Name != "" {
+		lock["name"] = op.Target.Name
+	}
+	if op.Target.Image != "" {
+		lock["image"] = op.Target.Image
 	}
 	if hostname, err := os.Hostname(); err == nil {
 		lock["hostname"] = hostname
@@ -1330,6 +1707,9 @@ func commandForTool(tool string) string {
 
 func auditTarget(op operationRecord) map[string]string {
 	target := map[string]string{"env": op.Target.Env}
+	if op.Target.Name != "" {
+		target["name"] = op.Target.Name
+	}
 	if op.Target.Profile != "" {
 		target["profile"] = op.Target.Profile
 	}
@@ -1338,6 +1718,12 @@ func auditTarget(op operationRecord) map[string]string {
 	}
 	if op.Target.VM != "" {
 		target["vm"] = op.Target.VM
+	}
+	if op.Target.Image != "" {
+		target["image"] = op.Target.Image
+	}
+	if op.Target.ContextDir != "" {
+		target["contextDir"] = op.Target.ContextDir
 	}
 	return target
 }
