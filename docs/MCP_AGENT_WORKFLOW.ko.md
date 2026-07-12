@@ -118,6 +118,7 @@ env_down_prepare
 env_clean_prepare
 env_rebuild_prepare
 addon_uninstall_prepare
+libvirt_vm_resume_prepare
 ```
 
 prepare 후 확인:
@@ -153,6 +154,7 @@ env_down_commit
 env_clean_commit
 env_rebuild_commit
 addon_uninstall_commit
+libvirt_vm_resume_commit
 ```
 
 `operation_approve` 이후에는 `operationId`만으로 commit할 수 있다.
@@ -162,8 +164,17 @@ addon_uninstall_commit
 
 ```text
 - env_up_commit, env_down_commit, env_clean_commit, env_rebuild_commit은 로컬 개발 장비에서 실행하지 않는다.
+- libvirt_vm_resume_commit도 원격 lab 장비에서만 실행한다.
 - 원격 lab 장비의 MCP server 또는 원격 checkout 기준으로 실행한다.
 - commit 직전 operation_status로 target.env, target.profile, risk, destructive를 다시 확인한다.
+```
+
+libvirt paused VM 복구:
+
+```text
+- doctor/collect_snapshot에서 LIBVIRT_VM_PAUSED, LIBVIRT_IO_ERROR, HOST_NOSPACE 근거를 확인한다.
+- storage pressure나 block I/O 원인을 먼저 해소한다.
+- libvirt_vm_resume_prepare → operation_approve → libvirt_vm_resume_commit 순서로 실행한다.
 ```
 
 ## 6. 실패 처리

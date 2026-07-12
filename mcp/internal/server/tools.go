@@ -60,6 +60,11 @@ type addonPrepareArg struct {
 	Addon string `json:"addon"`
 }
 
+type libvirtVMResumePrepareArg struct {
+	Env string `json:"env"`
+	VM  string `json:"vm"`
+}
+
 type envUpPrepareArg struct {
 	Profile string `json:"profile"`
 	Env     string `json:"env,omitempty"`
@@ -147,6 +152,8 @@ func readOnlyTools(info bootstrapInfo) map[string]toolHandler {
 	addSynthetic([]string{"profile.validate.v1", "env.status.v1"}, "env_rebuild_commit", "Commit a prepared env rebuild operation after approval.", addonCommitSchema(), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructiveCommitArgs("env_rebuild_commit"), 45*time.Minute)
 	addSynthetic([]string{"env.status.v1"}, "addon_uninstall_prepare", "Prepare an approved destructive addon uninstall operation.", destructivePrepareSchema(false, true), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructivePrepareArgs("addon_uninstall_prepare"), 30*time.Second)
 	addSynthetic([]string{"env.status.v1"}, "addon_uninstall_commit", "Commit a prepared addon uninstall operation after approval.", addonCommitSchema(), syntheticToolMeta("destructive_execution", "HIGH", true, true, "Stage 7"), destructiveCommitArgs("addon_uninstall_commit"), 15*time.Minute)
+	addSynthetic([]string{"env.status.v1", "vm.list.v1"}, "libvirt_vm_resume_prepare", "Prepare an approved libvirt VM resume operation.", libvirtVMResumePrepareSchema(), syntheticToolMeta("approved_mutation", "HIGH", false, true, "Stage 8"), libvirtVMResumePrepareArgs(), 30*time.Second)
+	addSynthetic([]string{"env.status.v1", "vm.list.v1"}, "libvirt_vm_resume_commit", "Commit a prepared libvirt VM resume operation after approval.", addonCommitSchema(), syntheticToolMeta("approved_mutation", "HIGH", false, true, "Stage 8"), libvirtVMResumeCommitArgs(), 2*time.Minute)
 	if capabilities["version.v1"] && capabilities["capabilities.v1"] {
 		addToolCatalog(handlers)
 	}
@@ -264,6 +271,39 @@ func addonCommitArgs() func(json.RawMessage) ([]string, error) {
 			return nil, fmt.Errorf("operationId is required")
 		}
 		out := []string{"__operation__", "addon_install_commit", "operationId=" + parsed.OperationID}
+		if parsed.ApprovalToken != "" {
+			out = append(out, "approvalToken="+parsed.ApprovalToken)
+		}
+		return out, nil
+	}
+}
+
+func libvirtVMResumePrepareArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed libvirtVMResumePrepareArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.Env == "" {
+			return nil, fmt.Errorf("env is required")
+		}
+		if parsed.VM == "" {
+			return nil, fmt.Errorf("vm is required")
+		}
+		return []string{"__operation__", "libvirt_vm_resume_prepare", "env=" + parsed.Env, "vm=" + parsed.VM}, nil
+	}
+}
+
+func libvirtVMResumeCommitArgs() func(json.RawMessage) ([]string, error) {
+	return func(raw json.RawMessage) ([]string, error) {
+		var parsed addonCommitArg
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		if parsed.OperationID == "" {
+			return nil, fmt.Errorf("operationId is required")
+		}
+		out := []string{"__operation__", "libvirt_vm_resume_commit", "operationId=" + parsed.OperationID}
 		if parsed.ApprovalToken != "" {
 			out = append(out, "approvalToken="+parsed.ApprovalToken)
 		}
@@ -653,6 +693,18 @@ func addonPrepareSchema() map[string]any {
 			"addon": map[string]any{"type": "string"},
 		},
 		"required":             []string{"env", "addon"},
+		"additionalProperties": false,
+	}
+}
+
+func libvirtVMResumePrepareSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"env": map[string]any{"type": "string"},
+			"vm":  map[string]any{"type": "string"},
+		},
+		"required":             []string{"env", "vm"},
 		"additionalProperties": false,
 	}
 }

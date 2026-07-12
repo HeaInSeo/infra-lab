@@ -45,6 +45,7 @@ type operationRecord struct {
 
 type operationTarget struct {
 	Env               string `json:"env"`
+	VM                string `json:"vm,omitempty"`
 	Addon             string `json:"addon,omitempty"`
 	Profile           string `json:"profile,omitempty"`
 	ProfileDigest     string `json:"profileDigest,omitempty"`
@@ -113,6 +114,20 @@ type profileValidationEnvelope struct {
 	} `json:"data"`
 }
 
+type vmListEnvelope struct {
+	OK   bool `json:"ok"`
+	Data struct {
+		VMs []struct {
+			Name    string `json:"name"`
+			Managed bool   `json:"managed"`
+			Env     string `json:"env"`
+			Backend string `json:"backend"`
+			State   string `json:"state"`
+			IPv4    string `json:"ipv4"`
+		} `json:"vms"`
+	} `json:"data"`
+}
+
 func handleOperation(args []string, timeout time.Duration) (string, error) {
 	action := ""
 	if len(args) > 0 {
@@ -132,6 +147,10 @@ func handleOperation(args []string, timeout time.Duration) (string, error) {
 		return prepareDestructive(action, fields)
 	case "env_down_commit", "env_clean_commit", "env_rebuild_commit", "addon_uninstall_commit":
 		return commitDestructive(action, fields, timeout)
+	case "libvirt_vm_resume_prepare":
+		return prepareLibvirtVMResume(fields)
+	case "libvirt_vm_resume_commit":
+		return commitLibvirtVMResume(fields, timeout)
 	case "status":
 		return operationStatus(fields["operationId"])
 	case "logs":
@@ -147,6 +166,161 @@ func handleOperation(args []string, timeout time.Duration) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported operation action: %s", action)
 	}
+}
+
+func prepareLibvirtVMResume(fields map[string]string) (string, error) {
+	env := fields["env"]
+	vm := fields["vm"]
+	if env == "" || vm == "" {
+		return "", fmt.Errorf("env and vm are required")
+	}
+	if err := validateTokenPart(env); err != nil {
+		return "", err
+	}
+	if err := validateTokenPart(vm); err != nil {
+		return "", err
+	}
+	if err := validateLibvirtVMTarget(env, vm); err != nil {
+		return "", err
+	}
+
+	now := time.Now().UTC()
+	op := operationRecord{
+		OperationID: operationID("libvirt_vm_resume"),
+		Tool:        "libvirt_vm_resume",
+		Status:      "PREPARED",
+		Risk:        "HIGH",
+		Destructive: false,
+		Target: operationTarget{
+			Env:               env,
+			VM:                vm,
+			TargetFingerprint: digest("libvirt_vm_resume", env, vm),
+		},
+		CreatedAt: now.Format(time.RFC3339),
+		ExpiresAt: now.Add(1 * time.Hour).Format(time.RFC3339),
+		Approval: operationApproval{
+			Required: true,
+			Status:   "required",
+			Mode:     "token-v1",
+		},
+		Steps: []operationStep{
+			{Name: "collect pre-snapshot", Status: "pending"},
+			{Name: "run libvirt vm resume", Status: "pending"},
+			{Name: "collect post-snapshot", Status: "pending"},
+		},
+	}
+	token, err := approvalToken(op)
+	if err != nil {
+		return "", err
+	}
+	op.Approval.TokenHint = token[:min(18, len(token))]
+	path, err := writeOperation(op)
+	if err != nil {
+		return "", err
+	}
+	data := operationPrepareData{
+		OperationID:       op.OperationID,
+		ApprovalToken:     token,
+		ExpiresAt:         op.ExpiresAt,
+		PlanFingerprint:   digest("plan", "libvirt_vm_resume", env, vm),
+		TargetFingerprint: op.Target.TargetFingerprint,
+		Approval:          op.Approval,
+		Risk:              op.Risk,
+		Target:            op.Target,
+		Steps:             []string{"collect pre-snapshot", "run libvirt vm resume", "collect post-snapshot"},
+		Operation:         op,
+		OperationPath:     path,
+		Warnings: []map[string]string{{
+			"code":    "VERIFY_STORAGE_BEFORE_RESUME",
+			"message": "resume only after host storage pressure or block I/O cause has been addressed",
+		}},
+	}
+	return encodeOperationEnvelope("libvirt.vm.resume.prepare", data)
+}
+
+func commitLibvirtVMResume(fields map[string]string, timeout time.Duration) (string, error) {
+	op, err := verifyPreparedOperation(fields, "libvirt_vm_resume")
+	if err != nil {
+		return "", err
+	}
+	if err := validateLibvirtVMTarget(op.Target.Env, op.Target.VM); err != nil {
+		return "", err
+	}
+	release, err := acquireEnvLock(op)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	if _, err := appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        "libvirt_vm_resume_commit",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      auditTarget(op),
+		Result:      "started",
+	}); err != nil {
+		return "", fmt.Errorf("AUDIT_WRITE_FAILED: %w", err)
+	}
+
+	op.Status = "RUNNING"
+	op.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	op.Approval.Status = "approved"
+	markStep(&op, "collect pre-snapshot", "running")
+	_, _ = writeOperation(op)
+	if err := saveOperationSnapshot(op.OperationID, "pre-snapshot.json", op.Target.Env); err != nil {
+		return failOperation(op, "SNAPSHOT_FAILED", err, "collect pre-snapshot")
+	}
+	markStep(&op, "collect pre-snapshot", "succeeded")
+	markStep(&op, "run libvirt vm resume", "running")
+	_, _ = writeOperation(op)
+	if err := runLoggedCommand(op, timeout, "virsh", "-c", "qemu:///system", "resume", op.Target.VM); err != nil {
+		return failOperation(op, "COMMAND_FAILED", err, "run libvirt vm resume")
+	}
+	markStep(&op, "run libvirt vm resume", "succeeded")
+	markStep(&op, "collect post-snapshot", "running")
+	_, _ = writeOperation(op)
+	if err := saveOperationSnapshot(op.OperationID, "post-snapshot.json", op.Target.Env); err != nil {
+		return failOperation(op, "SNAPSHOT_FAILED", err, "collect post-snapshot")
+	}
+	op.Status = "SUCCEEDED"
+	op.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	markStep(&op, "collect post-snapshot", "succeeded")
+	_, _ = writeOperation(op)
+	_, _ = appendAudit(profileAuditRecord{
+		Time:        time.Now().UTC().Format(time.RFC3339),
+		OperationID: op.OperationID,
+		Tool:        "libvirt_vm_resume_commit",
+		Actor:       "agent",
+		Risk:        op.Risk,
+		Target:      auditTarget(op),
+		Result:      "ok",
+	})
+	return encodeOperationEnvelope("libvirt.vm.resume.commit", op)
+}
+
+func validateLibvirtVMTarget(env, vm string) error {
+	raw, isErr, err := runILab([]string{"vm", "list"}, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	if isErr {
+		return fmt.Errorf("VM_LIST_FAILED: %s", strings.TrimSpace(raw))
+	}
+	return validateLibvirtVMTargetFromList(raw, env, vm)
+}
+
+func validateLibvirtVMTargetFromList(raw, env, vm string) error {
+	var parsed vmListEnvelope
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return err
+	}
+	for _, candidate := range parsed.Data.VMs {
+		if candidate.Name == vm && candidate.Env == env && candidate.Backend == "libvirt" && candidate.Managed {
+			return nil
+		}
+	}
+	return fmt.Errorf("VM_NOT_MANAGED_BY_ENV: vm %q is not a managed libvirt VM in env %q", vm, env)
 }
 
 func prepareDestructive(action string, fields map[string]string) (string, error) {
@@ -1161,6 +1335,9 @@ func auditTarget(op operationRecord) map[string]string {
 	}
 	if op.Target.Addon != "" {
 		target["addon"] = op.Target.Addon
+	}
+	if op.Target.VM != "" {
+		target["vm"] = op.Target.VM
 	}
 	return target
 }

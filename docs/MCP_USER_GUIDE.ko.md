@@ -740,6 +740,7 @@ env_up_commit
 env_down_commit
 env_clean_commit
 env_rebuild_commit
+libvirt_vm_resume_commit
 ```
 
 원격 검증 기준:
@@ -782,6 +783,7 @@ docs/MCP_PROFILE_WRITE.ko.md
 docs/MCP_APPROVED_SAFE_MUTATION.ko.md
 docs/MCP_APPROVED_ENV_UP.ko.md
 docs/MCP_DESTRUCTIVE_EXECUTION.ko.md
+docs/MCP_LIBVIRT_RECOVERY.ko.md
 docs/MCP_AGENT_WORKFLOW.ko.md
 docs/MCP_LIVE_VALIDATION_2026-07-01.ko.md
 docs/contracts/ILAB_JSON_CONTRACT.ko.md

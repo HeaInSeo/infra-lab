@@ -343,6 +343,8 @@ func toolPurpose(name string) string {
 		"env_rebuild_commit":        "승인된 env rebuild operation을 실행한다.",
 		"addon_uninstall_prepare":   "addon uninstall operation을 준비한다.",
 		"addon_uninstall_commit":    "승인된 addon uninstall operation을 실행한다.",
+		"libvirt_vm_resume_prepare": "libvirt VM resume operation을 준비한다.",
+		"libvirt_vm_resume_commit":  "승인된 libvirt VM resume operation을 실행한다.",
 		"operation_approve":         "준비된 operation을 승인한다.",
 		"operation_cancel":          "실행 전 operation을 취소한다.",
 		"operation_status":          "operation 상태를 조회한다.",

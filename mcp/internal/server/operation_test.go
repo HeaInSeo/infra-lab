@@ -96,7 +96,7 @@ func TestOperationToolsRegisteredWithRequiredCapabilities(t *testing.T) {
 	handlers := readOnlyTools(bootstrapInfo{
 		InfraLabVersion: "dev",
 		ContractVersion: supportedContractVersion,
-		Capabilities:    map[string]bool{"env.status.v1": true, "profile.validate.v1": true},
+		Capabilities:    map[string]bool{"env.status.v1": true, "profile.validate.v1": true, "vm.list.v1": true},
 	})
 	for _, name := range []string{
 		"addon_install_prepare",
@@ -117,6 +117,8 @@ func TestOperationToolsRegisteredWithRequiredCapabilities(t *testing.T) {
 		"env_rebuild_commit",
 		"addon_uninstall_prepare",
 		"addon_uninstall_commit",
+		"libvirt_vm_resume_prepare",
+		"libvirt_vm_resume_commit",
 	} {
 		if _, ok := handlers[name]; !ok {
 			t.Fatalf("expected %s to be registered", name)
@@ -223,5 +225,36 @@ func TestOperationLocksAndUnlockStale(t *testing.T) {
 	}
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
 		t.Fatalf("lock should be removed, stat err=%v", err)
+	}
+}
+
+func TestValidateLibvirtVMTargetFromList(t *testing.T) {
+	raw := `{
+  "ok": true,
+  "command": "vm.list",
+  "contractVersion": "infra-lab.contract/v1",
+  "data": {
+    "vms": [
+      {"name":"ebpf-dev","managed":true,"env":"ebpf-dev","backend":"libvirt","state":"running","ipv4":"192.168.122.166"},
+      {"name":"external","managed":false,"env":"","backend":"libvirt","state":"running","ipv4":""}
+    ]
+  },
+  "warnings": [],
+  "errors": []
+}`
+	if err := validateLibvirtVMTargetFromList(raw, "ebpf-dev", "ebpf-dev"); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateLibvirtVMTargetFromList(raw, "ebpf-dev", "external"); err == nil {
+		t.Fatal("expected unmanaged VM to be rejected")
+	}
+}
+
+func TestAuditTargetIncludesVM(t *testing.T) {
+	target := auditTarget(operationRecord{
+		Target: operationTarget{Env: "ebpf-dev", VM: "ebpf-dev"},
+	})
+	if target["env"] != "ebpf-dev" || target["vm"] != "ebpf-dev" {
+		t.Fatalf("unexpected audit target: %#v", target)
 	}
 }
