@@ -63,8 +63,9 @@ live 기준선은 [profiles/remote-seoy/cilium/live-snapshot](/opt/go/src/github
 - kube-proxy replacement: `true`
 - Gateway API: `enabled`
 - Hubble: `enabled`
-- LoadBalancer IP pool: `10.113.24.100/28`
-- L2 announcement interface: `mpqemubr0`
+- LoadBalancer IP: `10.113.24.96` (`harbor-gateway`)
+- Harbor endpoint: `https://harbor.lab.local`
+- L2 announcement policy: `lab-default-l2`, interface selector `^eth.*|^enp.*|^ens.*`
 
 현재 live 리소스:
 
@@ -124,11 +125,17 @@ live 기준선은 [profiles/remote-seoy/cilium/live-snapshot](/opt/go/src/github
 현재 live에서는 다음 구성이 기준이다.
 
 - `harbor/lab-gateway`
-- `HTTP:80`
 - `HTTPS:443`
 - `allowedRoutes.namespaces.from: All`
 - `harbor-route`
 - `dev-space-observability`
+
+주의:
+
+- `harbor.10.113.24.96.nip.io:80`은 과거 HTTP 예제에서 나온 주소다.
+- 현재 Harbor registry 접근 기준은 `harbor.lab.local:443`이다.
+- seoy 호스트에서 `10.113.24.96` ping이 실패해도 `https://harbor.lab.local/v2/`가 `401 Unauthorized`를 반환하면 Gateway/L2 경로는 동작 중이다.
+- 진단은 [scripts/host/harbor-gateway-diagnose.sh](/opt/go/src/github.com/HeaInSeo/infra-lab/scripts/host/harbor-gateway-diagnose.sh:1)를 사용한다.
 
 다만 `shift-left-observability`는 현재 live snapshot에 존재해도 공용 infra baseline으로는 아직 분류하지 않는다. 이는 “Cilium baseline의 일부”라기보다 “현재 workload가 Gateway에 추가로 부착한 Route”로 보는 편이 안전하다.
 

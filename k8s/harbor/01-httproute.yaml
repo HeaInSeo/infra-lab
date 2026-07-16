@@ -6,7 +6,8 @@
 #   - remote-seoy live 기준선은 profiles/remote-seoy/cilium 을 본다.
 #   - Harbor Helm 설치 (harbor 네임스페이스)
 #   - Gateway k8s/gateway/01-gateway.yaml 적용 완료
-#   - Harbor externalURL: http://harbor.10.113.24.96.nip.io
+#   - Legacy example only. Current seoy Harbor uses HTTPS Gateway hostname
+#     harbor.lab.local; do not use this nip.io HTTP endpoint for NodeVault.
 #   - cross-namespace parentRef 허용은 Gateway listener.allowedRoutes 설정으로 결정된다.
 #
 # Harbor Helm values 핵심 설정:
@@ -14,9 +15,8 @@
 #   expose.type: clusterIP
 #   expose.clusterIP.name: harbor
 #
-# seoy 호스트에서 접근하려면 LB IP 라우팅이 필요하다:
-#   sudo ip route replace 10.113.24.96/32 dev mpqemubr0
-#   sudo arp -s 10.113.24.96 <harbor-nginx-pod-mac>
+# seoy live 진단은 scripts/host/harbor-gateway-diagnose.sh 를 사용한다.
+# ping/ICMP 실패만으로 Cilium Gateway 장애로 판단하지 않는다.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

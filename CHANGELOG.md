@@ -6,6 +6,7 @@
 
 - Added approved MCP container image build/push tools (`container_image_build_push_prepare`, `container_image_build_push_commit`) for workflows such as pushing NodeVault images to Harbor without exposing raw docker/podman shell execution. (#32)
 - Added MCP libvirt VM resume recovery tools and documentation for paused VM recovery after storage or block I/O incidents. (#33)
+- Added a read-only Harbor Gateway diagnosis script and clarified that the current seoy Harbor endpoint is `harbor.lab.local:443`, not the legacy `harbor.10.113.24.96.nip.io:80` address. (#34)
 
 ## v0.7.7 - 2026-07-06
 

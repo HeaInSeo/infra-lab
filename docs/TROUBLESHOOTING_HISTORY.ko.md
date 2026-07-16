@@ -465,6 +465,47 @@ L4 smoke   ✅  K8s Job nfsmoke-xxxx 실행 → "smoke-ok" 출력 → 성공
 
 ---
 
+### 2026-07-16: Harbor Gateway endpoint 오판 — HTTP/nip.io와 HTTPS live 기준 혼동
+
+**현상**
+
+NodeVault 빌드 push 단계에서 다음 오류가 발생했습니다.
+
+```text
+dial tcp 10.113.24.96:80: i/o timeout
+```
+
+동시에 seoy 호스트에서 `ping 10.113.24.96`도 실패해 Cilium L2/Gateway 라우팅 장애처럼 보였습니다.
+
+**확인**
+
+```bash
+curl -vk --resolve harbor.lab.local:443:10.113.24.96 https://harbor.lab.local/v2/
+```
+
+결과는 `401 Unauthorized`였습니다. 이는 Harbor Gateway, L2 LoadBalancer IP, HTTPRoute가 동작하고 있으며 인증이 필요한 registry endpoint까지 도달했다는 뜻입니다.
+
+반면 다음 경로는 timeout입니다.
+
+```bash
+curl http://harbor.10.113.24.96.nip.io/v2/
+nc -vz 10.113.24.96 80
+```
+
+**원인**
+
+현재 live Harbor 기준은 `harbor.lab.local:443` HTTPS Gateway입니다. `harbor.10.113.24.96.nip.io:80`은 과거 HTTP 예제/문서에서 나온 주소이며 현재 live Gateway listener와 맞지 않습니다.
+
+**교훈**
+
+- Cilium Gateway/LB 진단에서 ICMP ping 실패만으로 장애를 확정하지 않습니다.
+- registry reachability는 `/v2/` HTTPS 요청의 HTTP status로 판단합니다.
+- `401 Unauthorized`는 네트워크 성공입니다. 다음 단계는 인증/CA 신뢰 설정 확인입니다.
+- NodeVault 같은 클라이언트는 `NODEVAULT_REGISTRY_ADDR=harbor.lab.local` 및 HTTPS/CA trust 기준으로 맞춰야 합니다.
+- read-only 진단은 `scripts/host/harbor-gateway-diagnose.sh`를 사용합니다.
+
+---
+
 ### 2026-06-21: NodeVault 인-Pod 빌드가 27시간 이상 멈춤 (조사 진행 중)
 
 **현상**

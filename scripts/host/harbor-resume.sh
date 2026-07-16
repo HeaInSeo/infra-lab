@@ -46,4 +46,4 @@ kubectl rollout status deployment/harbor-core     -n "${NAMESPACE}" --timeout=12
 kubectl rollout status deployment/harbor-portal   -n "${NAMESPACE}" --timeout=60s  || true
 kubectl rollout status deployment/harbor-nginx    -n "${NAMESPACE}" --timeout=60s  || true
 
-echo "[harbor-resume] done — Harbor available at http://harbor.10.113.24.96.nip.io"
+echo "[harbor-resume] done — Harbor available at https://harbor.lab.local"

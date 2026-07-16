@@ -24,7 +24,7 @@
 #      → 시스템 CA store (update-ca-certificates) 에 추가하는 방식으로 해결.
 #   6. Gateway API expose — harbor-nginx를 외부 진입점으로 쓰지 않는다.
 #      Cilium Gateway → HTTPRoute → Harbor ClusterIP 구조가 표준.
-#      externalURL은 Gateway가 발급받은 LB IP 기반 hostname을 사용.
+#      externalURL은 Gateway가 발급받은 LB IP로 해석되는 HARBOR_HOSTNAME을 사용.
 #
 # 사전 조건:
 #   - kubectl, helm이 PATH에 있어야 한다.
@@ -313,3 +313,4 @@ if [[ -n "${GATEWAY_IP:-}" ]]; then
 fi
 echo "[harbor-install]   proxy pull: ${HARBOR_HOSTNAME}/ghcr-io/<image>:<tag>"
 echo "[harbor-install]   example:    kubectl run test --image=${HARBOR_HOSTNAME}/ghcr-io/kube-vip/kube-vip:v0.8.9"
+echo "[harbor-install]   diagnose:   KUBECONFIG=${KUBECONFIG:-<default>} HARBOR_HOSTNAME=${HARBOR_HOSTNAME} scripts/host/harbor-gateway-diagnose.sh"
