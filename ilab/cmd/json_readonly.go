@@ -172,6 +172,56 @@ type vmVersionData struct {
 	OS    *lab.OSInfo    `json:"os,omitempty"`
 }
 
+type capabilityDescriptorData struct {
+	Name      string   `json:"name"`
+	Consumers []string `json:"consumers"`
+	Summary   string   `json:"summary"`
+}
+
+type capabilityListData struct {
+	Capabilities []capabilityDescriptorData `json:"capabilities"`
+}
+
+type capabilityCheckData struct {
+	Capability string                `json:"capability"`
+	Consumers  []string              `json:"consumers"`
+	Env        string                `json:"env,omitempty"`
+	Kubeconfig string                `json:"kubeconfig"`
+	Status     string                `json:"status"`
+	Health     doctorHealthData      `json:"health"`
+	Cluster    capabilityClusterData `json:"cluster"`
+	Nodes      []capabilityNodeData  `json:"nodes"`
+	Storage    capabilityStorageData `json:"storage"`
+	Checks     []capabilityCheckItem `json:"checks"`
+	Findings   []doctorFindingData   `json:"findings"`
+}
+
+type capabilityClusterData struct {
+	Reachable               bool   `json:"reachable"`
+	ServerVersion           string `json:"serverVersion,omitempty"`
+	HostUsersFieldSupported bool   `json:"hostUsersFieldSupported"`
+}
+
+type capabilityNodeData struct {
+	Name                    string `json:"name"`
+	KernelVersion           string `json:"kernelVersion,omitempty"`
+	ContainerRuntimeVersion string `json:"containerRuntimeVersion,omitempty"`
+	OCIRuntime              string `json:"ociRuntime,omitempty"`
+	OCIRuntimeVersion       string `json:"ociRuntimeVersion,omitempty"`
+}
+
+type capabilityStorageData struct {
+	DefaultStorageClass string   `json:"defaultStorageClass,omitempty"`
+	StorageClasses      []string `json:"storageClasses"`
+}
+
+type capabilityCheckItem struct {
+	Name   string `json:"name"`
+	Stage  string `json:"stage"`
+	Result string `json:"result"`
+	Detail string `json:"detail,omitempty"`
+}
+
 func envListPayload(envs []*lab.Env) envListData {
 	items := make([]envListItemData, 0, len(envs))
 	for _, env := range envs {

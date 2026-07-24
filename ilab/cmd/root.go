@@ -26,6 +26,8 @@ var jsonCapableCommands = map[string]bool{
 	"k8s.status":       true,
 	"vm.list":          true,
 	"vm.version":       true,
+	"capability.list":  true,
+	"capability.check": true,
 }
 
 var rootCmd = &cobra.Command{
@@ -82,6 +84,7 @@ func init() {
 	rootCmd.AddCommand(k8sCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(profileCmd)
+	rootCmd.AddCommand(capabilityCmd)
 }
 
 func wantsJSON() bool {

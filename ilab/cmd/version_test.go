@@ -28,6 +28,8 @@ func TestCurrentCapabilitiesData(t *testing.T) {
 		"k8s.status.v1",
 		"vm.list.v1",
 		"vm.version.v1",
+		"capability.list.v1",
+		"capability.check.v1",
 	}
 	if !reflect.DeepEqual(data.Capabilities, want) {
 		t.Fatalf("capabilities = %#v, want %#v", data.Capabilities, want)

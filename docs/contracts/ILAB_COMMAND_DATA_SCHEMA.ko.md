@@ -149,6 +149,58 @@ Failure uses `ok:false`, `data:null`, and `errors[]`.
 }
 ```
 
+## capability.list
+
+```json
+{
+  "capabilities": [
+    {
+      "name": "buildah-userns",
+      "consumers": ["nodevault"],
+      "summary": "in-Pod Buildah build under a Kubernetes User Namespace (pod.spec.hostUsers: false)"
+    }
+  ]
+}
+```
+
+## capability.check
+
+정적 discovery만 구현된 상태(issue #36 1단계)에서는 `checks[]`의 `smoke` stage 항목이 항상
+`NOT_IMPLEMENTED`이므로 `status`는 `SUPPORTED`가 될 수 없다 — 정적 체크가 전부 통과해도 최대
+`DEGRADED`까지만 나온다. `health.risk`는 기존 doctor.v1/k8s.status.v1과 같은 LOW/MEDIUM/HIGH
+어휘를 유지하고, 판정 자체는 `status`(SUPPORTED/UNSUPPORTED/NOT_VERIFIED/DEGRADED)를 본다.
+
+```json
+{
+  "capability": "buildah-userns",
+  "consumers": ["nodevault"],
+  "env": "libvirt-cilium",
+  "kubeconfig": "state/libvirt-cilium/kubeconfig",
+  "status": "DEGRADED",
+  "health": {"risk": "MEDIUM", "summary": "static discovery passed; smoke tests are not yet implemented"},
+  "cluster": {"reachable": true, "serverVersion": "v1.36.2", "hostUsersFieldSupported": true},
+  "nodes": [
+    {
+      "name": "lab-worker-0",
+      "kernelVersion": "6.8.0-31-generic",
+      "containerRuntimeVersion": "containerd://2.0.1",
+      "ociRuntime": "crun",
+      "ociRuntimeVersion": "1.28"
+    }
+  ],
+  "storage": {"defaultStorageClass": "local-path", "storageClasses": ["local-path"]},
+  "checks": [
+    {"name": "K8S_VERSION", "stage": "static", "result": "PASS", "detail": "server v1.36.2 >= v1.30 (hostUsers baseline)"},
+    {"name": "NODE_RUNTIME", "stage": "static", "result": "PASS", "detail": "all nodes report containerd >= 2.0 with crun as the OCI runtime"},
+    {"name": "HOST_USERS_API", "stage": "static", "result": "PASS", "detail": "pod.spec.hostUsers is present in the API schema"},
+    {"name": "STORAGECLASS", "stage": "static", "result": "PASS", "detail": "default StorageClass \"local-path\" present"},
+    {"name": "USERNS_SMOKE_TEST", "stage": "smoke", "result": "NOT_IMPLEMENTED", "detail": "disposable hostUsers:false Pod smoke test scheduled for a later iteration"},
+    {"name": "BUILDAH_SMOKE_TEST", "stage": "smoke", "result": "NOT_IMPLEMENTED", "detail": "disposable Buildah build smoke test scheduled for a later iteration"}
+  ],
+  "findings": []
+}
+```
+
 ## vm.version
 
 ```json

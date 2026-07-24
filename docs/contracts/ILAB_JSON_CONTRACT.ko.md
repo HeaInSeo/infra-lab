@@ -49,6 +49,8 @@ profile.validate.v1
 k8s.status.v1
 vm.list.v1
 vm.version.v1
+capability.list.v1
+capability.check.v1
 ```
 
 Unsupported `--json` commands return `CAPABILITY_UNSUPPORTED`.
