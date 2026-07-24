@@ -165,25 +165,39 @@ Failure uses `ok:false`, `data:null`, and `errors[]`.
 
 ## capability.check
 
-정적 discovery만 구현된 상태(issue #36 1단계)에서는 `checks[]`의 `smoke` stage 항목이 항상
-`NOT_IMPLEMENTED`이므로 `status`는 `SUPPORTED`가 될 수 없다 — 정적 체크가 전부 통과해도 최대
-`DEGRADED`까지만 나온다. `health.risk`는 기존 doctor.v1/k8s.status.v1과 같은 LOW/MEDIUM/HIGH
-어휘를 유지하고, 판정 자체는 `status`(SUPPORTED/UNSUPPORTED/NOT_VERIFIED/DEGRADED)를 본다.
+`checks[]`의 `static` stage 4개(K8S_VERSION/NODE_RUNTIME/HOST_USERS_API/STORAGECLASS)와 `smoke` stage
+2개(USERNS_SMOKE_TEST/BUILDAH_SMOKE_TEST)가 모두 구현되어 있다. `status`는 이 6개 체크로부터 파생된다:
+하나라도 `FAIL`이면 `UNSUPPORTED`, `UNKNOWN`/`SKIPPED`가 있으면(스모크 테스트 전제조건 미충족 포함)
+`NOT_VERIFIED`, 전부 `PASS`면 `SUPPORTED`. `BUILDAH_SMOKE_TEST`는 `USERNS_SMOKE_TEST`가 `PASS`하지
+못하면 실행하지 않고 `SKIPPED`로 표기한다. `health.risk`는 기존 doctor.v1/k8s.status.v1과 같은
+LOW/MEDIUM/HIGH 어휘를 유지한다.
+
+스모크 테스트는 전용 임시 namespace(`ilab-capability-check-<kind>-<타임스탬프>`)에 Pod를 만들어
+실행하고, 결과와 무관하게 항상 정리한다(delete는 `--wait=false`로 비동기 실행 — 확인 직후에는
+`Terminating` 상태로 잠깐 보일 수 있음).
+
+아래는 seoy-libvirt-cilium 클러스터(kernel 6.8, containerd 2.2.1, crun 1.28)에서 실제로 관찰된 결과다.
+정적 체크와 `USERNS_SMOKE_TEST`는 전부 통과했지만, `BUILDAH_SMOKE_TEST`는 커널이 강제하는
+mount-namespace 소유권 제약(Buildah가 자신의 mount namespace를 private으로 바꾸려는 시도가
+`hostUsers:false`의 root filesystem에서는 거부됨) 때문에 실패했다 — CAP_SYS_ADMIN과 unconfined
+seccomp profile을 둘 다 시도해봤지만 결과가 바뀌지 않아, 단순 RBAC/권한 문제가 아니라 이 스택(K8s
+User Namespaces + Buildah 기본 저장 경로) 자체의 근본적인 비호환으로 보인다는 점을 `detail`에 그대로
+남긴다.
 
 ```json
 {
   "capability": "buildah-userns",
   "consumers": ["nodevault"],
-  "env": "libvirt-cilium",
-  "kubeconfig": "state/libvirt-cilium/kubeconfig",
-  "status": "DEGRADED",
-  "health": {"risk": "MEDIUM", "summary": "static discovery passed; smoke tests are not yet implemented"},
+  "env": "seoy-libvirt-cilium",
+  "kubeconfig": "state/seoy-libvirt-cilium/kubeconfig",
+  "status": "UNSUPPORTED",
+  "health": {"risk": "HIGH", "summary": "one or more required checks failed"},
   "cluster": {"reachable": true, "serverVersion": "v1.36.2", "hostUsersFieldSupported": true},
   "nodes": [
     {
       "name": "lab-worker-0",
-      "kernelVersion": "6.8.0-31-generic",
-      "containerRuntimeVersion": "containerd://2.0.1",
+      "kernelVersion": "6.8.0-134-generic",
+      "containerRuntimeVersion": "containerd://2.2.1",
       "ociRuntime": "crun",
       "ociRuntimeVersion": "1.28"
     }
@@ -194,10 +208,12 @@ Failure uses `ok:false`, `data:null`, and `errors[]`.
     {"name": "NODE_RUNTIME", "stage": "static", "result": "PASS", "detail": "all nodes report containerd >= 2.0 with crun as the OCI runtime"},
     {"name": "HOST_USERS_API", "stage": "static", "result": "PASS", "detail": "pod.spec.hostUsers is present in the API schema"},
     {"name": "STORAGECLASS", "stage": "static", "result": "PASS", "detail": "default StorageClass \"local-path\" present"},
-    {"name": "USERNS_SMOKE_TEST", "stage": "smoke", "result": "NOT_IMPLEMENTED", "detail": "disposable hostUsers:false Pod smoke test scheduled for a later iteration"},
-    {"name": "BUILDAH_SMOKE_TEST", "stage": "smoke", "result": "NOT_IMPLEMENTED", "detail": "disposable Buildah build smoke test scheduled for a later iteration"}
+    {"name": "USERNS_SMOKE_TEST", "stage": "smoke", "result": "PASS", "detail": "disposable hostUsers:false Pod ran, wrote to emptyDir, and exited 0 (id: uid=0(root) gid=0(root) groups=0(root),10(wheel))"},
+    {"name": "BUILDAH_SMOKE_TEST", "stage": "smoke", "result": "FAIL", "detail": "in-Pod Buildah cannot privatize its own mount namespace under hostUsers:false — ... (see repo for full text) ..."}
   ],
-  "findings": []
+  "findings": [
+    {"code": "BUILDAH_USERNS_MOUNT_INCOMPATIBLE", "message": "in-Pod Buildah cannot privatize its own mount namespace under hostUsers:false on this cluster — see BUILDAH_SMOKE_TEST detail for the full explanation"}
+  ]
 }
 ```
 

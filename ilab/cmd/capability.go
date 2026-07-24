@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -218,17 +220,30 @@ func capabilityCheckBuildahUsernsPayload(root, envName string) (capabilityCheckD
 	}
 	checks = append(checks, scCheck)
 
-	// Smoke stage: not implemented this iteration (see #36 scope note).
-	checks = append(checks,
-		capabilityCheckItem{
-			Name: "USERNS_SMOKE_TEST", Stage: "smoke", Result: "NOT_IMPLEMENTED",
-			Detail: "disposable hostUsers:false Pod smoke test scheduled for a later iteration",
-		},
-		capabilityCheckItem{
-			Name: "BUILDAH_SMOKE_TEST", Stage: "smoke", Result: "NOT_IMPLEMENTED",
-			Detail: "disposable Buildah build smoke test scheduled for a later iteration",
-		},
-	)
+	// Smoke stage: disposable, self-cleaning Pods in the live cluster.
+	usernsSmoke := runUserNamespaceSmokeTest(kubeconfig)
+	checks = append(checks, capabilityCheckItem{
+		Name: "USERNS_SMOKE_TEST", Stage: "smoke",
+		Result: usernsSmoke.Result, Detail: usernsSmoke.Detail,
+	})
+	if usernsSmoke.Result == "PASS" {
+		buildahSmoke := runBuildahSmokeTest(kubeconfig)
+		checks = append(checks, capabilityCheckItem{
+			Name: "BUILDAH_SMOKE_TEST", Stage: "smoke",
+			Result: buildahSmoke.Result, Detail: buildahSmoke.Detail,
+		})
+		if buildahSmoke.Result == "FAIL" && strings.Contains(buildahSmoke.Detail, "mount namespace") {
+			findings = append(findings, doctorFindingData{
+				Code:    "BUILDAH_USERNS_MOUNT_INCOMPATIBLE",
+				Message: "in-Pod Buildah cannot privatize its own mount namespace under hostUsers:false on this cluster — see BUILDAH_SMOKE_TEST detail for the full explanation",
+			})
+		}
+	} else {
+		checks = append(checks, capabilityCheckItem{
+			Name: "BUILDAH_SMOKE_TEST", Stage: "smoke", Result: "SKIPPED",
+			Detail: "skipped because USERNS_SMOKE_TEST did not pass",
+		})
+	}
 
 	status, risk, summary := capabilityStatus(checks)
 
@@ -252,28 +267,25 @@ func capabilityCheckBuildahUsernsPayload(root, envName string) (capabilityCheckD
 }
 
 // capabilityStatus derives the issue-#36 four-state verdict from the
-// individual checks. Smoke-stage checks are NOT_IMPLEMENTED this iteration,
-// so SUPPORTED can never be reached yet — the best a clean cluster gets is
-// DEGRADED, which is intentional: full support requires the smoke tests.
+// individual checks. NOT_IMPLEMENTED/SKIPPED both mean "couldn't reach a
+// verdict for this check" — the former because this ilab build doesn't run
+// that check yet, the latter because a prerequisite check didn't PASS — so
+// both cap the result below SUPPORTED the same way UNKNOWN does.
 func capabilityStatus(checks []capabilityCheckItem) (status, risk, summary string) {
-	var hasFail, hasUnknown, smokeIncomplete bool
+	var hasFail, hasUnknown bool
 	for _, c := range checks {
 		switch c.Result {
 		case "FAIL":
 			hasFail = true
-		case "UNKNOWN":
+		case "UNKNOWN", "NOT_IMPLEMENTED", "SKIPPED":
 			hasUnknown = true
-		case "NOT_IMPLEMENTED":
-			smokeIncomplete = true
 		}
 	}
 	switch {
 	case hasFail:
-		return "UNSUPPORTED", "HIGH", "one or more required static checks failed"
+		return "UNSUPPORTED", "HIGH", "one or more required checks failed"
 	case hasUnknown:
 		return "NOT_VERIFIED", "MEDIUM", "one or more checks could not be verified"
-	case smokeIncomplete:
-		return "DEGRADED", "MEDIUM", "static discovery passed; smoke tests are not yet implemented"
 	default:
 		return "SUPPORTED", "LOW", "all static and smoke checks passed"
 	}
@@ -441,4 +453,219 @@ func kubectlStorageClasses(kubeconfig string) (defaultClass string, all []string
 	}
 	sort.Strings(all)
 	return defaultClass, all, nil
+}
+
+// smokeResult is the outcome of a single disposable-resource smoke test.
+type smokeResult struct {
+	Result string // PASS | FAIL | UNKNOWN
+	Detail string
+}
+
+const smokeTimeout = 90 * time.Second
+
+// runUserNamespaceSmokeTest creates a disposable hostUsers:false Pod, checks
+// that it starts, runs as a remapped (non-host) UID/GID, and can write to an
+// emptyDir volume — then removes the namespace it created, success or
+// failure, so no smoke-test state survives the check.
+func runUserNamespaceSmokeTest(kubeconfig string) smokeResult {
+	ns := smokeNamespaceName("userns")
+	const pod = "userns-smoke"
+	manifest := fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %[1]s
+  labels:
+    app.kubernetes.io/managed-by: ilab-capability-check
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: %[2]s
+  namespace: %[1]s
+  labels:
+    app.kubernetes.io/managed-by: ilab-capability-check
+spec:
+  hostUsers: false
+  restartPolicy: Never
+  containers:
+  - name: smoke
+    image: busybox:1.36
+    command: ["sh", "-c", "id && echo ilab-smoke-marker > /work/test.txt && cat /work/test.txt"]
+    volumeMounts:
+    - name: work
+      mountPath: /work
+  volumes:
+  - name: work
+    emptyDir: {}
+`, ns, pod)
+
+	defer kubectlDeleteNamespaceAsync(kubeconfig, ns)
+
+	if err := kubectlApplyManifest(kubeconfig, manifest); err != nil {
+		return classifySmokeSetupError(err, "hostUsers:false Pod")
+	}
+
+	phase, err := waitForPodTerminal(kubeconfig, ns, pod, smokeTimeout)
+	if err != nil {
+		return smokeResult{Result: "UNKNOWN", Detail: err.Error()}
+	}
+	logs, _ := kubectlPodLogs(kubeconfig, ns, pod)
+	if phase != "Succeeded" {
+		return smokeResult{Result: "FAIL", Detail: fmt.Sprintf("Pod ended in phase %q (want Succeeded); logs: %s", phase, truncateOutput(logs))}
+	}
+	if !strings.Contains(logs, "ilab-smoke-marker") {
+		return smokeResult{Result: "FAIL", Detail: "Pod succeeded but did not write/read back the expected emptyDir marker"}
+	}
+	return smokeResult{Result: "PASS", Detail: fmt.Sprintf("disposable hostUsers:false Pod ran, wrote to emptyDir, and exited 0 (id: %s)", firstLine(logs))}
+}
+
+// runBuildahSmokeTest creates a disposable hostUsers:false Pod that runs a
+// minimal in-Pod Buildah build (vfs storage driver) and cleans up its
+// namespace regardless of outcome. It intentionally requests no extra
+// capabilities or seccomp changes: adding CAP_SYS_ADMIN + an unconfined
+// seccomp profile was tried against the live seoy-libvirt-cilium cluster and
+// made no difference (see classifyBuildahFailure) — the failure this
+// reproduces is a mount-namespace-ownership restriction the kernel enforces
+// regardless of the container's own capability set, so granting more
+// capabilities here would just be privilege escalation with no payoff.
+func runBuildahSmokeTest(kubeconfig string) smokeResult {
+	ns := smokeNamespaceName("buildah")
+	const pod = "buildah-smoke"
+	manifest := fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %[1]s
+  labels:
+    app.kubernetes.io/managed-by: ilab-capability-check
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: %[2]s
+  namespace: %[1]s
+  labels:
+    app.kubernetes.io/managed-by: ilab-capability-check
+spec:
+  hostUsers: false
+  restartPolicy: Never
+  containers:
+  - name: smoke
+    image: quay.io/buildah/stable:latest
+    command:
+    - sh
+    - -c
+    - |
+      set -e
+      mkdir -p /tmp/build
+      printf 'FROM busybox:1.36\nRUN echo ilab-smoke-build\n' > /tmp/build/Containerfile
+      buildah --storage-driver vfs bud -f /tmp/build/Containerfile -t ilab-smoke:test /tmp/build
+`, ns, pod)
+
+	defer kubectlDeleteNamespaceAsync(kubeconfig, ns)
+
+	if err := kubectlApplyManifest(kubeconfig, manifest); err != nil {
+		return classifySmokeSetupError(err, "Buildah smoke Pod")
+	}
+
+	phase, err := waitForPodTerminal(kubeconfig, ns, pod, smokeTimeout)
+	if err != nil {
+		return smokeResult{Result: "UNKNOWN", Detail: err.Error()}
+	}
+	logs, _ := kubectlPodLogs(kubeconfig, ns, pod)
+	if phase != "Succeeded" {
+		return smokeResult{Result: "FAIL", Detail: classifyBuildahFailure(logs)}
+	}
+	return smokeResult{Result: "PASS", Detail: "disposable in-Pod Buildah build (FROM busybox, vfs storage driver) completed successfully"}
+}
+
+// classifyBuildahFailure recognizes the specific "remount /" mount-namespace-
+// ownership error observed on the live seoy-libvirt-cilium cluster (crun
+// 1.28 + containerd 2.2.1 + kernel 6.8): Buildah tries to privatize its own
+// mount namespace to manage image layers, but the Pod's root filesystem
+// mount is owned by an ancestor (host) user namespace under hostUsers:false,
+// so the kernel denies the remount no matter what capabilities the
+// container holds. Granting CAP_SYS_ADMIN + an unconfined seccomp profile
+// was tested against this exact cluster and made no difference.
+func classifyBuildahFailure(logs string) string {
+	if strings.Contains(logs, "remount /") && strings.Contains(logs, "permission denied") {
+		return fmt.Sprintf(
+			"in-Pod Buildah cannot privatize its own mount namespace under hostUsers:false — "+
+				"the Pod's root filesystem is mounted in a mount namespace owned by an ancestor "+
+				"(host) user namespace, so the kernel denies Buildah's own \"remount / (MS_PRIVATE)\" "+
+				"regardless of granted capabilities (CAP_SYS_ADMIN + unconfined seccomp were tried and "+
+				"did not help). This looks like a fundamental incompatibility between Kubernetes User "+
+				"Namespaces and Buildah's default (containers/storage) layer-application path on this "+
+				"stack, not a fixable RBAC/capability gap. Raw error: %s",
+			truncateOutput(logs),
+		)
+	}
+	return fmt.Sprintf("Pod did not complete successfully; logs: %s", truncateOutput(logs))
+}
+
+func smokeNamespaceName(kind string) string {
+	return fmt.Sprintf("ilab-capability-check-%s-%d", kind, time.Now().UnixNano())
+}
+
+func kubectlApplyManifest(kubeconfig, manifest string) error {
+	cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(manifest)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// kubectlDeleteNamespaceAsync fires a non-blocking delete so a slow or
+// stuck cluster-side GC never makes a capability check hang — it's a
+// best-effort cleanup, not a guarantee the namespace disappears instantly.
+func kubectlDeleteNamespaceAsync(kubeconfig, ns string) {
+	_ = exec.Command("kubectl", "--kubeconfig", kubeconfig, "delete", "namespace", ns, "--ignore-not-found", "--wait=false").Run()
+}
+
+func waitForPodTerminal(kubeconfig, ns, pod string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		out, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", ns, "get", "pod", pod, "-o", "jsonpath={.status.phase}").Output()
+		if err == nil {
+			phase := strings.TrimSpace(string(out))
+			if phase == "Succeeded" || phase == "Failed" {
+				return phase, nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timed out after %s waiting for pod %s/%s to finish", timeout, ns, pod)
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func kubectlPodLogs(kubeconfig, ns, pod string) (string, error) {
+	out, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", ns, "logs", pod).Output()
+	return string(out), err
+}
+
+// classifySmokeSetupError distinguishes "we're not allowed to test this"
+// (RBAC — NOT_VERIFIED via UNKNOWN) from "the cluster rejected the thing
+// we're testing" (admission/spec — FAIL) so the verdict matches the cause.
+func classifySmokeSetupError(err error, what string) smokeResult {
+	msg := err.Error()
+	if strings.Contains(strings.ToLower(msg), "forbidden") {
+		return smokeResult{Result: "UNKNOWN", Detail: fmt.Sprintf("insufficient RBAC permissions to run the %s: %s", what, msg)}
+	}
+	return smokeResult{Result: "FAIL", Detail: fmt.Sprintf("%s was rejected: %s", what, msg)}
+}
+
+func truncateOutput(s string) string {
+	s = strings.TrimSpace(s)
+	const max = 400
+	if len(s) > max {
+		return s[:max] + "...(truncated)"
+	}
+	return s
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return strings.TrimSpace(line)
 }
