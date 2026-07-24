@@ -234,8 +234,8 @@ func capabilityCheckBuildahUsernsPayload(root, envName string) (capabilityCheckD
 		})
 		if buildahSmoke.Result == "FAIL" && strings.Contains(buildahSmoke.Detail, "mount namespace") {
 			findings = append(findings, doctorFindingData{
-				Code:    "BUILDAH_USERNS_MOUNT_INCOMPATIBLE",
-				Message: "in-Pod Buildah cannot privatize its own mount namespace under hostUsers:false on this cluster — see BUILDAH_SMOKE_TEST detail for the full explanation",
+				Code:    "BUILDAH_CLI_USERNS_MOUNT_LIMITATION",
+				Message: "the buildah CLI cannot privatize its own mount namespace under hostUsers:false on this cluster (Go-API-based builders like NodeVault's are unaffected) — see BUILDAH_SMOKE_TEST detail for the full explanation",
 			})
 		}
 	} else {
@@ -519,15 +519,29 @@ spec:
 	return smokeResult{Result: "PASS", Detail: fmt.Sprintf("disposable hostUsers:false Pod ran, wrote to emptyDir, and exited 0 (id: %s)", firstLine(logs))}
 }
 
-// runBuildahSmokeTest creates a disposable hostUsers:false Pod that runs a
-// minimal in-Pod Buildah build (vfs storage driver) and cleans up its
-// namespace regardless of outcome. It intentionally requests no extra
-// capabilities or seccomp changes: adding CAP_SYS_ADMIN + an unconfined
-// seccomp profile was tried against the live seoy-libvirt-cilium cluster and
-// made no difference (see classifyBuildahFailure) — the failure this
-// reproduces is a mount-namespace-ownership restriction the kernel enforces
-// regardless of the container's own capability set, so granting more
-// capabilities here would just be privilege escalation with no payoff.
+// runBuildahSmokeTest creates a disposable hostUsers:false Pod that shells
+// out to the `buildah` CLI for a minimal in-Pod build, and cleans up its
+// namespace regardless of outcome. The securityContext mirrors NodeVault's
+// actual production nodevault-controlplane Deployment (capabilities.add
+// including SYS_ADMIN, privileged: false, runAsUser 0) as closely as a
+// single disposable container reasonably can.
+//
+// This was iterated against the live seoy-libvirt-cilium cluster: neither
+// SYS_ADMIN + an unconfined seccomp profile, nor `--storage-driver vfs`,
+// nor mounting build storage on its own emptyDir instead of the container's
+// root fs, avoid the failure (see classifyBuildahFailure) — it happens
+// before any storage driver or capability comes into play. `buildah unshare`
+// (the documented rootless-in-restricted-environment wrapper) fails
+// differently (gid_map write denied), since it expects a non-zero subuid-
+// mapped user rather than a Pod already running as uid 0 under hostUsers.
+//
+// NodeVault's own builder (podbridge5) calls Buildah's Go packages directly
+// in-process rather than shelling out to the `buildah` CLI, and per
+// docs/TROUBLESHOOTING_HISTORY.ko.md (2026-06-22) it builds successfully in
+// that exact production Deployment. So this smoke test's FAIL result means
+// "the buildah CLI's own startup path doesn't work here", not "Buildah is
+// incompatible with hostUsers:false on this cluster" — see
+// classifyBuildahFailure for the caveat surfaced in the check's own output.
 func runBuildahSmokeTest(kubeconfig string) smokeResult {
 	ns := smokeNamespaceName("buildah")
 	const pod = "buildah-smoke"
@@ -551,6 +565,14 @@ spec:
   containers:
   - name: smoke
     image: quay.io/buildah/stable:latest
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+      runAsUser: 0
+      runAsGroup: 0
+      capabilities:
+        drop: ["ALL"]
+        add: ["SYS_ADMIN", "SETUID", "SETGID", "SYS_CHROOT", "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "SETFCAP"]
     command:
     - sh
     - -c
@@ -575,27 +597,34 @@ spec:
 	if phase != "Succeeded" {
 		return smokeResult{Result: "FAIL", Detail: classifyBuildahFailure(logs)}
 	}
-	return smokeResult{Result: "PASS", Detail: "disposable in-Pod Buildah build (FROM busybox, vfs storage driver) completed successfully"}
+	return smokeResult{Result: "PASS", Detail: "disposable in-Pod Buildah CLI build (FROM busybox, vfs storage driver) completed successfully"}
 }
 
-// classifyBuildahFailure recognizes the specific "remount /" mount-namespace-
-// ownership error observed on the live seoy-libvirt-cilium cluster (crun
-// 1.28 + containerd 2.2.1 + kernel 6.8): Buildah tries to privatize its own
-// mount namespace to manage image layers, but the Pod's root filesystem
-// mount is owned by an ancestor (host) user namespace under hostUsers:false,
-// so the kernel denies the remount no matter what capabilities the
-// container holds. Granting CAP_SYS_ADMIN + an unconfined seccomp profile
-// was tested against this exact cluster and made no difference.
+// classifyBuildahFailure recognizes the specific "remount /" error observed
+// repeatedly on the live seoy-libvirt-cilium cluster (crun 1.28 + containerd
+// 2.2.1 + kernel 6.8) across every variant tried (default overlay driver,
+// vfs driver, dedicated emptyDir storage volume, added capabilities): the
+// `buildah` CLI's own startup path tries to privatize its process-wide mount
+// namespace before touching any storage driver, and the Pod's root
+// filesystem mount is owned by an ancestor (host) user namespace under
+// hostUsers:false, so the kernel denies that regardless of what the
+// container's own capability set allows. This is a `buildah`-CLI-specific
+// limitation, not proof Buildah-the-library can't run here — NodeVault's own
+// builder calls Buildah's Go packages directly (no CLI reexec) and is
+// independently confirmed working in this exact hostUsers:false Deployment.
 func classifyBuildahFailure(logs string) string {
 	if strings.Contains(logs, "remount /") && strings.Contains(logs, "permission denied") {
 		return fmt.Sprintf(
-			"in-Pod Buildah cannot privatize its own mount namespace under hostUsers:false — "+
-				"the Pod's root filesystem is mounted in a mount namespace owned by an ancestor "+
-				"(host) user namespace, so the kernel denies Buildah's own \"remount / (MS_PRIVATE)\" "+
-				"regardless of granted capabilities (CAP_SYS_ADMIN + unconfined seccomp were tried and "+
-				"did not help). This looks like a fundamental incompatibility between Kubernetes User "+
-				"Namespaces and Buildah's default (containers/storage) layer-application path on this "+
-				"stack, not a fixable RBAC/capability gap. Raw error: %s",
+			"the `buildah` CLI's own startup path tries to privatize its mount namespace "+
+				"before running any build step, and that remount of \"/\" (MS_PRIVATE) is denied "+
+				"under hostUsers:false regardless of storage driver, storage volume placement, or "+
+				"added capabilities (SYS_ADMIN + unconfined seccomp, vfs driver, and a dedicated "+
+				"emptyDir storage mount were all tried against this cluster with no change in "+
+				"outcome). This is a limitation of invoking the buildah CLI specifically, not "+
+				"necessarily of Buildah's underlying Go packages: NodeVault's own builder calls "+
+				"those packages in-process (no CLI reexec) and is confirmed building successfully "+
+				"under this same hostUsers:false Deployment (see "+
+				"docs/TROUBLESHOOTING_HISTORY.ko.md, 2026-06-22). Raw error: %s",
 			truncateOutput(logs),
 		)
 	}
