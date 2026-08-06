@@ -106,6 +106,9 @@ func currentCapabilitiesData() capabilitiesData {
 			"vm.version.v1",
 			"capability.list.v1",
 			"capability.check.v1",
+			"context.capture.v1",
+			"context.resolve.v1",
+			"context.invalidate.v1",
 		},
 	}
 }
