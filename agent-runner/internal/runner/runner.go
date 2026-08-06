@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -75,6 +76,9 @@ func (r *Runner) evaluate(ctx context.Context, task Task, now time.Time) decisio
 			return decision{State: StateCheckpointStale, Reason: "lease expired but checkpoint is fresh"}
 		}
 		return decision{State: StateReleased, Reason: "expired lease takeover is not implemented in phase 1"}
+	}
+	if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.Role) == "" || strings.TrimSpace(task.WorkCategory) == "" {
+		return decision{State: StateFailed, Reason: "missing task_id/role/work_category"}
 	}
 	if task.Repository == "" || task.DefaultHeadSHA == "" || task.TargetBranch == "" || task.PR == "" {
 		return decision{State: StateFailed, Reason: "missing repository/default_head_sha/target_branch/pr"}
@@ -150,10 +154,14 @@ func (r *Runner) runTask(ctx context.Context, task Task, repoPath string, now ti
 	if err != nil {
 		return err
 	}
+	if err := verifyClaimEvidence(refreshed, claim); err != nil {
+		r.log.Event(ctx, Event{Type: "invalid_claim_evidence", State: StateFailed, TaskID: task.ID, SessionID: sessionID, Message: err.Error()})
+		return nil
+	}
 	switch {
-	case isCompleted(refreshed):
+	case isCompleted(refreshed, sessionID, eventID):
 		r.log.Event(ctx, Event{Type: "verified_completed", State: StateCompleted, TaskID: task.ID, SessionID: sessionID})
-	case isBlocked(refreshed):
+	case isBlocked(refreshed, sessionID, eventID):
 		r.log.Event(ctx, Event{Type: "verified_blocked", State: StateBlocked, TaskID: task.ID, SessionID: sessionID})
 	default:
 		r.log.Event(ctx, Event{Type: "no_completion_evidence", State: StateFailed, TaskID: task.ID, SessionID: sessionID})
@@ -181,7 +189,10 @@ func deniedCategory(category string) bool {
 	return false
 }
 
-func isCompleted(task Task) bool {
+func isCompleted(task Task, sessionID, eventID string) bool {
+	if task.EvidenceSessionID != sessionID || task.EvidenceEventID != eventID {
+		return false
+	}
 	switch strings.ToLower(task.CompletionState) {
 	case "completed", "완료", "완료보고":
 		return true
@@ -194,7 +205,10 @@ func isCompleted(task Task) bool {
 	}
 }
 
-func isBlocked(task Task) bool {
+func isBlocked(task Task, sessionID, eventID string) bool {
+	if task.EvidenceSessionID != sessionID || task.EvidenceEventID != eventID {
+		return false
+	}
 	switch strings.ToLower(task.CompletionState) {
 	case "blocked", "차단", "design_gap":
 		return true
@@ -205,6 +219,19 @@ func isBlocked(task Task) bool {
 	default:
 		return false
 	}
+}
+
+func verifyClaimEvidence(task Task, claim Claim) error {
+	if claim.DryRun {
+		return nil
+	}
+	if task.SessionID != claim.SessionID || task.RunnerID != claim.RunnerID || task.EventID != claim.EventID || task.ResumeCapsule != claim.ResumeCapsule {
+		return errors.New("refreshed claim identity or resume capsule does not match atomic claim")
+	}
+	if task.LeaseUntil == nil || !task.LeaseUntil.Equal(claim.LeaseUntil) || task.CheckpointAt == nil || !task.CheckpointAt.Equal(claim.CheckpointAt) {
+		return errors.New("refreshed lease or checkpoint does not match atomic claim")
+	}
+	return nil
 }
 
 func resumeCapsule(task Task, sessionID string) string {

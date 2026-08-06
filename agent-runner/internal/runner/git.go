@@ -11,7 +11,28 @@ import (
 type GitInspector struct{}
 
 func (GitInspector) DefaultHead(ctx context.Context, repoPath string) (string, error) {
-	out, err := git(ctx, repoPath, "rev-parse", "origin/main")
+	branch, err := git(ctx, repoPath, "branch", "--show-current")
+	if err != nil {
+		return "", err
+	}
+	remote, err := git(ctx, repoPath, "config", "--get", "branch."+strings.TrimSpace(branch)+".remote")
+	if err != nil || strings.TrimSpace(remote) == "." {
+		remotes, listErr := git(ctx, repoPath, "remote")
+		if listErr != nil {
+			return "", listErr
+		}
+		fields := strings.Fields(remotes)
+		if len(fields) != 1 {
+			return "", fmt.Errorf("cannot determine default remote: configure the current branch remote (found %d remotes)", len(fields))
+		}
+		remote = fields[0]
+	}
+	remote = strings.TrimSpace(remote)
+	defaultRef, err := git(ctx, repoPath, "symbolic-ref", "--quiet", "refs/remotes/"+remote+"/HEAD")
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve default branch for remote %q: %w", remote, err)
+	}
+	out, err := git(ctx, repoPath, "rev-parse", "--verify", strings.TrimSpace(defaultRef))
 	if err != nil {
 		return "", err
 	}

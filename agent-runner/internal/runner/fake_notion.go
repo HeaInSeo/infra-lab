@@ -67,11 +67,30 @@ func (a *FakeNotionAdapter) Claim(_ context.Context, claim Claim) (ClaimResult, 
 		return ClaimResult{Claimed: true, Task: task}, nil
 	}
 	task.SessionID = claim.SessionID
+	task.RunnerID = claim.RunnerID
 	task.LeaseUntil = &claim.LeaseUntil
 	task.CheckpointAt = &claim.CheckpointAt
+	task.EventID = claim.EventID
+	task.ResumeCapsule = claim.ResumeCapsule
 	task.Version++
 	a.tasks[task.ID] = task
 	return ClaimResult{Claimed: true, Task: task}, nil
+}
+
+// SetTerminalEvidence models a fake Notion writer recording terminal evidence.
+// Evidence must identify the claim session and its checkpoint event.
+func (a *FakeNotionAdapter) SetTerminalEvidence(taskID, state, sessionID, eventID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	task, ok := a.tasks[taskID]
+	if !ok {
+		return errors.New("task not found")
+	}
+	task.CompletionState = state
+	task.EvidenceSessionID = sessionID
+	task.EvidenceEventID = eventID
+	a.tasks[taskID] = task
+	return nil
 }
 
 func (a *FakeNotionAdapter) Refresh(_ context.Context, taskID string) (Task, error) {

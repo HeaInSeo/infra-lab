@@ -117,6 +117,27 @@ func TestSkipsDeniedCategoryAndMissingRequiredFields(t *testing.T) {
 	}
 }
 
+func TestRejectsMissingClaimContractFields(t *testing.T) {
+	for _, field := range []string{"task_id", "role", "work_category"} {
+		t.Run(field, func(t *testing.T) {
+			task := runnableTask("unused")
+			switch field {
+			case "task_id":
+				task.ID = ""
+			case "role":
+				task.Role = ""
+			case "work_category":
+				task.WorkCategory = ""
+			}
+			r := New(testConfig(t, nil), NewFakeNotionAdapter(nil), GitInspector{}, DryRunLauncher{}, NewJSONLogger(&bytes.Buffer{}))
+			got := r.evaluate(context.Background(), task, fixedNow())
+			if got.Runnable || got.State != StateFailed || got.Reason != "missing task_id/role/work_category" {
+				t.Fatalf("malformed task decision = %#v", got)
+			}
+		})
+	}
+}
+
 func TestDefaultHeadMismatchPreventsLaunch(t *testing.T) {
 	repo := newGitRepo(t, "agent-runner-dry-run")
 	task := runnableTask("0000000000000000000000000000000000000000")
@@ -136,17 +157,16 @@ func TestDefaultHeadMismatchPreventsLaunch(t *testing.T) {
 	}
 }
 
-func TestNonDryRunFakeClaimMutatesAndCompletionEvidenceCompletes(t *testing.T) {
+func TestNonDryRunFakeClaimPersistsAtomicRecordAndCurrentEvidenceCompletes(t *testing.T) {
 	repo := newGitRepo(t, "agent-runner-dry-run")
 	head := gitOutput(t, repo, "rev-parse", "origin/main")
 	task := runnableTask(head)
-	task.CompletionState = "completed"
 	adapter := NewFakeNotionAdapter([]Task{task})
 	var logs bytes.Buffer
 	cfg := testConfig(t, map[string]string{task.Repository: repo})
 	cfg.DryRun = false
 
-	r := New(cfg, adapter, GitInspector{}, DryRunLauncher{}, NewJSONLogger(&logs))
+	r := New(cfg, adapter, GitInspector{}, evidenceLauncher{adapter: adapter, state: "completed"}, NewJSONLogger(&logs))
 	if err := r.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -157,9 +177,61 @@ func TestNonDryRunFakeClaimMutatesAndCompletionEvidenceCompletes(t *testing.T) {
 	if got.SessionID == "" {
 		t.Fatal("expected fake claim to record session id")
 	}
+	if got.RunnerID != cfg.RunnerID || got.EventID == "" || got.ResumeCapsule == "" || got.CheckpointAt == nil {
+		t.Fatalf("incomplete atomic claim record: %#v", got)
+	}
 	if !strings.Contains(logs.String(), `"state":"COMPLETED"`) {
 		t.Fatalf("expected completed evidence, got logs:\n%s", logs.String())
 	}
+}
+
+func TestStaleTerminalEvidenceCannotCompleteNewSession(t *testing.T) {
+	repo := newGitRepo(t, "agent-runner-dry-run")
+	head := gitOutput(t, repo, "rev-parse", "refs/remotes/origin/HEAD")
+	task := runnableTask(head)
+	task.CompletionState = "completed"
+	task.EvidenceSessionID = "previous-session"
+	task.EvidenceEventID = "previous-event"
+	adapter := NewFakeNotionAdapter([]Task{task})
+	var logs bytes.Buffer
+	cfg := testConfig(t, map[string]string{task.Repository: repo})
+	cfg.DryRun = false
+
+	r := New(cfg, adapter, GitInspector{}, DryRunLauncher{}, NewJSONLogger(&logs))
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(logs.String(), `"state":"COMPLETED"`) || !strings.Contains(logs.String(), `"state":"FAILED"`) {
+		t.Fatalf("stale evidence was accepted:\n%s", logs.String())
+	}
+}
+
+func TestDefaultHeadUsesConfiguredRemoteDefaultBranch(t *testing.T) {
+	repo := newGitRepoWithRemote(t, "feature", "upstream", "trunk")
+	want := gitOutput(t, repo, "rev-parse", "HEAD")
+	got, err := (GitInspector{}).DefaultHead(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("DefaultHead: %v", err)
+	}
+	if got != want {
+		t.Fatalf("DefaultHead = %q, want %q", got, want)
+	}
+}
+
+type evidenceLauncher struct {
+	adapter *FakeNotionAdapter
+	state   string
+}
+
+func (l evidenceLauncher) Launch(ctx context.Context, task Task, _ string, sessionID string) (LaunchResult, error) {
+	claimed, err := l.adapter.Refresh(ctx, task.ID)
+	if err != nil {
+		return LaunchResult{}, err
+	}
+	if err := l.adapter.SetTerminalEvidence(task.ID, l.state, sessionID, claimed.EventID); err != nil {
+		return LaunchResult{}, err
+	}
+	return LaunchResult{}, nil
 }
 
 func testConfig(t *testing.T, repos map[string]string) Config {
@@ -201,6 +273,10 @@ func runnableTask(head string) Task {
 }
 
 func newGitRepo(t *testing.T, branch string) string {
+	return newGitRepoWithRemote(t, branch, "origin", "main")
+}
+
+func newGitRepoWithRemote(t *testing.T, branch, remote, defaultBranch string) string {
 	t.Helper()
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", branch)
@@ -212,12 +288,15 @@ func newGitRepo(t *testing.T, branch string) string {
 	runGit(t, dir, "add", "README.md")
 	runGit(t, dir, "commit", "-m", "init")
 	head := gitOutput(t, dir, "rev-parse", "HEAD")
-	if err := os.MkdirAll(filepath.Join(dir, ".git", "refs", "remotes", "origin"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".git", "refs", "remotes", remote), 0o755); err != nil {
 		t.Fatalf("mkdir refs: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".git", "refs", "remotes", "origin", "main"), []byte(head+"\n"), 0o644); err != nil {
-		t.Fatalf("write origin main ref: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, ".git", "refs", "remotes", remote, defaultBranch), []byte(head+"\n"), 0o644); err != nil {
+		t.Fatalf("write remote default ref: %v", err)
 	}
+	runGit(t, dir, "remote", "add", remote, filepath.Join(t.TempDir(), "unused.git"))
+	runGit(t, dir, "config", "branch."+branch+".remote", remote)
+	runGit(t, dir, "symbolic-ref", "refs/remotes/"+remote+"/HEAD", "refs/remotes/"+remote+"/"+defaultBranch)
 	return dir
 }
 

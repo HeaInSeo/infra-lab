@@ -69,20 +69,25 @@ func (c Config) now() time.Time {
 }
 
 type Task struct {
-	ID              string     `json:"id"`
-	Lane            string     `json:"lane"`
-	Status          string     `json:"status"`
-	Repository      string     `json:"repository"`
-	DefaultHeadSHA  string     `json:"default_head_sha"`
-	TargetBranch    string     `json:"target_branch"`
-	PR              string     `json:"pr"`
-	Role            string     `json:"role"`
-	WorkCategory    string     `json:"work_category"`
-	SessionID       string     `json:"session_id,omitempty"`
-	LeaseUntil      *time.Time `json:"lease_until,omitempty"`
-	CheckpointAt    *time.Time `json:"checkpoint_at,omitempty"`
-	Version         int64      `json:"version"`
-	CompletionState string     `json:"completion_state,omitempty"`
+	ID                string     `json:"id"`
+	Lane              string     `json:"lane"`
+	Status            string     `json:"status"`
+	Repository        string     `json:"repository"`
+	DefaultHeadSHA    string     `json:"default_head_sha"`
+	TargetBranch      string     `json:"target_branch"`
+	PR                string     `json:"pr"`
+	Role              string     `json:"role"`
+	WorkCategory      string     `json:"work_category"`
+	SessionID         string     `json:"session_id,omitempty"`
+	LeaseUntil        *time.Time `json:"lease_until,omitempty"`
+	CheckpointAt      *time.Time `json:"checkpoint_at,omitempty"`
+	RunnerID          string     `json:"runner_id,omitempty"`
+	EventID           string     `json:"event_id,omitempty"`
+	ResumeCapsule     string     `json:"resume_capsule,omitempty"`
+	Version           int64      `json:"version"`
+	CompletionState   string     `json:"completion_state,omitempty"`
+	EvidenceSessionID string     `json:"evidence_session_id,omitempty"`
+	EvidenceEventID   string     `json:"evidence_event_id,omitempty"`
 }
 
 type Claim struct {
