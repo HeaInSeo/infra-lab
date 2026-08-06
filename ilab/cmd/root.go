@@ -14,20 +14,23 @@ import (
 var jsonOutput bool
 
 var jsonCapableCommands = map[string]bool{
-	"version":          true,
-	"capabilities":     true,
-	"doctor":           true,
-	"env.list":         true,
-	"env.status":       true,
-	"env.info":         true,
-	"profile.list":     true,
-	"profile.show":     true,
-	"profile.validate": true,
-	"k8s.status":       true,
-	"vm.list":          true,
-	"vm.version":       true,
-	"capability.list":  true,
-	"capability.check": true,
+	"version":            true,
+	"capabilities":       true,
+	"doctor":             true,
+	"env.list":           true,
+	"env.status":         true,
+	"env.info":           true,
+	"profile.list":       true,
+	"profile.show":       true,
+	"profile.validate":   true,
+	"k8s.status":         true,
+	"vm.list":            true,
+	"vm.version":         true,
+	"capability.list":    true,
+	"capability.check":   true,
+	"context.capture":    true,
+	"context.resolve":    true,
+	"context.invalidate": true,
 }
 
 var rootCmd = &cobra.Command{
