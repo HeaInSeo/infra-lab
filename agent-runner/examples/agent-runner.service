@@ -1,0 +1,19 @@
+[Unit]
+Description=agent-runner dry-run local scheduler
+After=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=30
+WorkingDirectory=%h/src/infra-lab/agent-runner
+ExecStart=%h/src/infra-lab/bin/agent-runner \
+  --lane=operator \
+  --dry-run \
+  --fake-notion=%h/src/infra-lab/agent-runner/examples/tasks.fake.json \
+  --repo=HeaInSeo/infra-lab=%h/src/infra-lab
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
