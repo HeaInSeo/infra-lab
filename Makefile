@@ -4,6 +4,7 @@ SHELL       := /usr/bin/env bash
 
 ILAB_BIN := bin/ilab
 MCP_BIN  := bin/infra-lab-mcp
+AGENT_RUNNER_BIN := bin/agent-runner
 VERSION ?= $(shell cat VERSION 2>/dev/null || echo dev)
 GIT_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -23,12 +24,25 @@ build-mcp:
 	@cd mcp && go build -o ../$(MCP_BIN) ./cmd/infra-lab-mcp
 	@echo "[OK] $(MCP_BIN)"
 
+.PHONY: build-agent-runner
+build-agent-runner:
+	@echo "==> build agent-runner dry-run CLI"
+	@mkdir -p bin
+	@cd agent-runner && go build -buildvcs=false -o ../$(AGENT_RUNNER_BIN) ./cmd/agent-runner
+	@echo "[OK] $(AGENT_RUNNER_BIN)"
+
 .PHONY: test-mcp
 test-mcp:
 	@echo "==> test infra-lab MCP server"
 	@cd mcp && go test ./...
 	@$(MAKE) build-mcp
 	@echo "[OK] test-mcp"
+
+.PHONY: test-agent-runner
+test-agent-runner:
+	@echo "==> test agent-runner"
+	@cd agent-runner && go test ./...
+	@echo "[OK] test-agent-runner"
 
 .PHONY: mcp-setup
 mcp-setup: build build-mcp
@@ -139,6 +153,8 @@ help:
 	@echo "  test-go     go test ./..."
 	@echo "  test-contract  Validate ilab JSON contract tests"
 	@echo "  test-mcp    Test and build MCP stdio server"
+	@echo "  build-agent-runner  Build agent-runner dry-run CLI"
+	@echo "  test-agent-runner   Test agent-runner"
 	@echo "  mcp-setup   Open the MCP setup menu"
 	@echo ""
 	@echo "Environment targets:"
