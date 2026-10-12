@@ -149,6 +149,7 @@ function runnerFixture(t, fault) {
       writes++;const value=pages.get(request.page_id);const e=request.content_updates[0];value.structuredContent.text=value.structuredContent.text.replace(e.old_str,e.new_str);
       if(fault==='lost-ack')throw new Error('connection lost after commit');
       if(fault==='async')return {content:[{type:'text',text:'Async'}],structuredContent:{async_task:{task_id:'task_1'}}};
+      if(fault==='content-only')return {content:[{type:'text',text:JSON.stringify({page_id:request.page_id})}]};
       return {content:[{type:'text',text:'Success'}],structuredContent:{page_id:request.page_id}};
     },
     async mcp__codex_apps__notion_notion_get_async_task(){return {content:[{type:'text',text:'Failed'}],structuredContent:{status:'failed'}};}
@@ -171,4 +172,8 @@ test('completed observation replays no mutation even for prefix expansion',async
 test('DC consumed cursor: retained response by exact ID avoids resend and permits verification',async t=>{
   const f=runnerFixture(t,'cursor');assert.equal((await f.runner.run('observation',[edit()])).status,'COMPLETED');
   assert.equal(f.writes,1);assert.equal(f.fetches,3);assert.equal(f.closed,true);
+});
+test('native Notion content-only JSON ACK is recognized and then fully read back',async t=>{
+  const f=runnerFixture(t,'content-only');assert.equal((await f.runner.run('observation',[edit(),edit(B)])).status,'COMPLETED');
+  assert.equal(f.writes,2);assert.equal(f.fetches,6);
 });
