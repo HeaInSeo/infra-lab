@@ -17,7 +17,7 @@
   }
   function response(result, requestId) {
     if (result.isError) throw new Error('REMOTE_ERROR: '+textOf(result).slice(0,300));
-    const values = textOf(result).split('\n').filter(line => line.startsWith('NPG/1 ')).map(line => JSON.parse(line.slice(6)));
+    const values = textOf(result).split('\n').map(line=>line.trim()).filter(line => line.startsWith('NPG/1 ')).map(line => JSON.parse(line.slice(6)));
     return values.find(value => value.requestId === requestId);
   }
   async function start() {
@@ -38,10 +38,12 @@
     await start();
     const requestId = 'projection-'+pid+'-'+(++sequence);
     const result = await settled(await tools.mcp__codex_apps__remote_desktop_commander_interact_with_process({
-      deviceId, pid, input: JSON.stringify({ ...request, requestId })+'\n', timeout_ms: 3000, wait_for_prompt: false }));
+      deviceId, pid, input: JSON.stringify({ ...request, requestId })+'\n', timeout_ms: 3000, wait_for_prompt: true }));
     let value = response(result, requestId);
     for (let n=0; !value && n<12; n++) {
-      value = response(await settled(await tools.mcp__codex_apps__remote_desktop_commander_read_process_output({ deviceId, pid, timeout_ms: 3000, length: 30 })), requestId);
+      // DC's incremental cursor can already have consumed output during input.
+      // Read the retained tail and match the exact request ID; never resend it.
+      value = response(await settled(await tools.mcp__codex_apps__remote_desktop_commander_read_process_output({ deviceId, pid, offset:-30, timeout_ms: 3000, length: 30 })), requestId);
     }
     if (!value) throw new Error('BROKER_RESPONSE_UNKNOWN');
     if (!value.ok) { const error = new Error(value.code+': '+value.error); error.code=value.code; throw error; }
