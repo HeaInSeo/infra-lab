@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "productionEnabled": false,
+  "productionPages": [
+    "3f586e6dd1d181d59bc7e5e4bb5a4ac0",
+    "3f586e6dd1d18175aba4df2142117f12",
+    "3f386e6dd1d1815ea128d5bdf320a7d1",
+    "3f386e6dd1d181e29c6ed3757f13bfd0",
+    "3b286e6dd1d1817aa093fca807659f07",
+    "3b286e6dd1d181f2a75cfbd3885071c4",
+    "3bf86e6dd1d18110938bc358e17c779e",
+    "3ed86e6dd1d18118b0b8d98bb91892fb",
+    "3b286e6dd1d1811d9308d9a2b56c9de4",
+    "3f086e6dd1d1818e9aecdc093a08cda9",
+    "3f586e6dd1d181ddb9f3e7217f64bfcd"
+  ],
+  "canaryPages": [
+    "3f786e6dd1d18157bd46dc0c805bf3cb",
+    "3f786e6dd1d181008ed3dc1f14717d06"
+  ],
+  "headingPrefixes": [
+    "## CURRENT CENTRAL OBSERVATION",
+    "## CURRENT CENTRAL ACTION",
+    "## CURRENT INCIDENT MAINTENANCE"
+  ]
+}
