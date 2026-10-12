@@ -9,7 +9,7 @@ from Sori PR39's ledger tail-loss defect.
 | Prevent unsafe body selection | Generated exact literals only; no whole-page replacement; ownership and size checks | Code implemented |
 | Save and verify protected content | Durable preimage before mutation; exact whole-body/property readback | Code implemented |
 | Stop propagation | No page two after unexpected readback, lost ACK or async failure; state survives restart | Regression verified |
-| Connect actual caller | Hosted Code Mode runner uses same authenticated connector and remote broker | Canary verification required |
+| Connect actual caller | Hosted Code Mode runner uses same authenticated connector and remote broker | Native two-page canary + stop-before-next-write verified; hosted route saved |
 | Restore damaged pages | Recover lost historical ranges and retain newest genuine worker receipts | Pending |
 | Resume central safely | Restored pages reconciled; guarded calling path observed; production hold reviewed | Blocked |
 
