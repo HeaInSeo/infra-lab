@@ -127,14 +127,18 @@ test('snapshot persistence failure yields no write authorization',t=>{
 
 const createRunner=vm.runInNewContext(fs.readFileSync(path.join(__dirname,'runner.js'),'utf8'),{setTimeout:(fn)=>setTimeout(fn,0)});
 function runnerFixture(t, fault) {
-  const f=fixture(t);let writes=0,fetches=0,closed=false;const pages=new Map([[A,page()],[B,page(B)]]);
+  const f=fixture(t);let writes=0,fetches=0,closed=false,retained=null;const pages=new Map([[A,page()],[B,page(B)]]);
   const tools={
     async mcp__codex_apps__remote_desktop_commander_start_process(){return {content:[{type:'text',text:'Process started with PID 123\nNPG/1 {"ready":true}'}]};},
     async mcp__codex_apps__remote_desktop_commander_interact_with_process({input}){
       const r=JSON.parse(input);let value;
       try{value={requestId:r.requestId,ok:true,result:f.b.handle(r)};}catch(e){value={requestId:r.requestId,ok:false,code:e.code,error:e.message};}
       if(r.action==='close')closed=true;
+      if(fault==='cursor' && r.action==='prepare') {retained=value;return {content:[{type:'text',text:'Input sent; read output'}]};}
       return {content:[{type:'text',text:'NPG/1 '+JSON.stringify(value)}]};
+    },
+    async mcp__codex_apps__remote_desktop_commander_read_process_output({offset}){
+      return {content:[{type:'text',text:offset<0?'  NPG/1 '+JSON.stringify(retained):'No new output'}]};
     },
     async mcp__codex_apps__notion_fetch({id}){
       fetches++;const value=structuredClone(pages.get(id));
@@ -163,4 +167,8 @@ for(const fault of ['readback','lost-ack','async'])test('connector '+fault+' pre
 test('completed observation replays no mutation even for prefix expansion',async t=>{
   const f=runnerFixture(t);const edits=[edit(A,{newStr:oldStr+' then verified'})];await f.runner.run('observation',edits);
   assert.equal((await f.newRunner().run('observation',edits)).alreadyConsumed,true);assert.equal(f.writes,1);
+});
+test('DC consumed cursor: retained response by exact ID avoids resend and permits verification',async t=>{
+  const f=runnerFixture(t,'cursor');assert.equal((await f.runner.run('observation',[edit()])).status,'COMPLETED');
+  assert.equal(f.writes,1);assert.equal(f.fetches,3);assert.equal(f.closed,true);
 });
