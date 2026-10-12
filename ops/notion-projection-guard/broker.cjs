@@ -99,6 +99,8 @@ function plan(page, edit) {
     fail('OUTSIDE_SECTION', 'Literal crosses the explicit central section');
   // A nested native/fenced/worker proof section is never central-owned.
   const content = page.body.slice(section.end, boundary.start);
+  if (headings(page.body).some(h => h.start > section.end && h.start < boundary.start))
+    fail('PROTECTED_SECTION', 'Nested headings require a separately reviewed central section');
   if (/```|~~~|<\/?(?:synced_block|synced_block_reference|page|database|folder|unknown|meeting-notes)\b|QUEUE_EVENT_V1/.test(content))
     fail('PROTECTED_SECTION', 'Native/fenced/worker content prevents editing this section');
   if (/\b(?:event_id|session_id|lease_state)\s*[":=]/.test(content))
@@ -131,6 +133,14 @@ function read(file) {
 
 class Broker {
   constructor(root, policy) {
+    const centralPrefixes = ['## CURRENT CENTRAL OBSERVATION', '## CURRENT CENTRAL ACTION', '## CURRENT INCIDENT MAINTENANCE'];
+    if (!policy || typeof policy.productionEnabled !== 'boolean' ||
+        !Array.isArray(policy.productionPages) || !Array.isArray(policy.canaryPages) ||
+        !Array.isArray(policy.headingPrefixes) || !policy.headingPrefixes.length ||
+        policy.headingPrefixes.some(p => !centralPrefixes.includes(p))) fail('POLICY', 'Invalid central-owned policy');
+    for (const page of [...policy.productionPages, ...policy.canaryPages]) {
+      if (id(page) !== page) fail('POLICY', 'Policy requires canonical page UUIDs');
+    }
     this.root = path.resolve(root); this.policy = policy; this.file = path.join(this.root, 'journal.json');
     fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });
     const st = fs.lstatSync(this.root);
@@ -154,6 +164,7 @@ class Broker {
   handle(input) {
     const { action, batchId } = input;
     if (action === 'status') return clone(this.state);
+    if (action === 'close') return { status: 'CLOSED' };
     if (typeof batchId !== 'string' || !/^[a-zA-Z0-9_.:-]{1,150}$/.test(batchId) ||
         ['__proto__', 'prototype', 'constructor'].includes(batchId)) fail('BATCH_ID', 'Stable safe observation ID required');
     if (action === 'begin') {
@@ -170,7 +181,7 @@ class Broker {
           fail('PRODUCTION_HOLD', 'Production remains blocked until incident restoration');
       }
       const key = hash(JSON.stringify(edits));
-      const previous = this.state.batches[batchId];
+      const previous = Object.hasOwn(this.state.batches,batchId) ? this.state.batches[batchId] : null;
       if (previous) {
         if (previous.planHash !== key) fail('BATCH_REUSE', 'Observation ID cannot bind different edits');
         return { status: previous.status, next: previous.next, reused: true };
@@ -252,7 +263,10 @@ if (require.main === module) {
     let request;
     try {
       request = JSON.parse(line);
-      process.stdout.write('NPG/1 '+JSON.stringify({ requestId: request.requestId, ok: true, result: broker.handle(request) })+'\n');
+      const result = broker.handle(request);
+      process.stdout.write('NPG/1 '+JSON.stringify({ requestId: request.requestId, ok: true, result })+'\n', () => {
+        if (request.action === 'close') { rl.close(); process.stdin.destroy(); process.exit(0); }
+      });
     } catch (e) {
       process.stdout.write('NPG/1 '+JSON.stringify({ requestId: request?.requestId, ok: false, code: e.code ?? 'ERROR', error: e.message })+'\n');
     }
