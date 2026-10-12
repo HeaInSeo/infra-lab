@@ -49,13 +49,22 @@
     if (!value.ok) { const error = new Error(value.code+': '+value.error); error.code=value.code; throw error; }
     return value.result;
   }
+  function connectorData(result) {
+    let data=result;
+    for(let n=0;n<5 && data.structuredContent;n++) data=data.structuredContent;
+    if(data!==result) return data;
+    for(const item of result.content??[]) {
+      if(item.type==='text') {try {return JSON.parse(item.text);}catch { /* Not a structured reply. */ }}
+    }
+    return null;
+  }
   function asyncTask(result) {
-    const data = result.structuredContent;
+    const data = connectorData(result);
     return data?.async_task ?? data?.result?.async_task;
   }
   async function update(request) {
     let result = await tools.mcp__codex_apps__notion_notion_update_page(request);
-    if (result.isError || result.structuredContent?.error) throw new Error('NOTION_UPDATE_FAILED');
+    if (result.isError || connectorData(result)?.error) throw new Error('NOTION_UPDATE_FAILED');
     const task = asyncTask(result);
     if (task) {
       if (!task.task_id) throw new Error('ASYNC_RESULT_UNKNOWN');
@@ -64,15 +73,19 @@
         await new Promise(resolve => setTimeout(resolve,1000));
         result = await tools.mcp__codex_apps__notion_notion_get_async_task({ task_id:task.task_id });
         if (result.isError) throw new Error('ASYNC_FAILED');
-        let data=result;
-        for (let j=0;j<5 && data.structuredContent;j++) data=data.structuredContent;
+        const data=connectorData(result);
+        if(!data)throw new Error('ASYNC_RESULT_UNKNOWN');
         if (data.status === 'failed') throw new Error('ASYNC_FAILED');
         if (data.status === 'succeeded') { completed=true; break; }
         if (!['queued','running','retrying'].includes(data.status)) throw new Error('ASYNC_RESULT_UNKNOWN');
       }
       if (!completed) throw new Error('ASYNC_PENDING_RECONCILE_REQUIRED');
     } else if (/"?async_task"?\s*[:=]/.test(textOf(result))) throw new Error('ASYNC_RESULT_UNKNOWN');
-    if (!result.structuredContent || !result.content?.length) throw new Error('NOTION_RESULT_UNKNOWN');
+    if(!task) {
+      const data=connectorData(result);
+      if(typeof data?.page_id!=='string' || data.page_id.replaceAll('-','').toLowerCase()!==request.page_id)
+        throw new Error('NOTION_RESULT_UNKNOWN');
+    }
     return result;
   }
   async function close() {
