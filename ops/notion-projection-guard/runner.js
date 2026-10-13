@@ -38,7 +38,9 @@
     await start();
     const requestId = 'projection-'+pid+'-'+(++sequence);
     const result = await settled(await tools.mcp__codex_apps__remote_desktop_commander_interact_with_process({
-      deviceId, pid, input: JSON.stringify({ ...request, requestId })+'\n', timeout_ms: 3000, wait_for_prompt: true }));
+      // This is a JSON-line protocol, not a shell prompt. DC prompt detection
+      // can compile the echoed multi-megabyte page as a regular expression.
+      deviceId, pid, input: JSON.stringify({ ...request, requestId })+'\n', timeout_ms: 3000, wait_for_prompt: false }));
     let value = response(result, requestId);
     for (let n=0; !value && n<12; n++) {
       // DC's incremental cursor can already have consumed output during input.
@@ -121,5 +123,38 @@
       throw error;
     } finally { await close(); }
   }
-  return { run, broker, close };
+  async function resume(batchId, expectedPlanHash) {
+    const receipts = [];
+    try {
+      const state = await broker({ action:'status' });
+      const batch = state.batches?.[batchId];
+      if (state.active !== batchId || !batch || batch.planHash !== expectedPlanHash ||
+          batch.status !== 'HALTED' || !batch.receipt) throw new Error('RECONCILE_IDENTITY');
+      const identity = { batchId, planHash:expectedPlanHash, expectedError:batch.error };
+      // Recheck every durable completed receipt; these reads issue no mutation.
+      for (let index=0; index<batch.next; index++) {
+        await broker({ action:'reconcile_verified', ...identity, index,
+          page:await tools.mcp__codex_apps__notion_fetch({ id:batch.edits[index].pageId }) });
+      }
+      await broker({ action:'reconcile_unwritten', ...identity, ticket:batch.receipt.ticket,
+        page:await tools.mcp__codex_apps__notion_fetch({ id:batch.edits[batch.next].pageId }) });
+      for (let index=batch.next; index<batch.edits.length; index++) {
+        const edit=batch.edits[index];
+        // Keep the immutable pending snapshot and ticket on the first page.
+        const prepared=index===batch.next ? batch.receipt : await broker({ action:'prepare', batchId,
+          page:await tools.mcp__codex_apps__notion_fetch({ id:edit.pageId }) });
+        const authorized=await broker({ action:'authorize', batchId, ticket:prepared.ticket,
+          page:await tools.mcp__codex_apps__notion_fetch({ id:edit.pageId }) });
+        await update(authorized.request);
+        const verified=await broker({ action:'verify', batchId, ticket:prepared.ticket,
+          page:await tools.mcp__codex_apps__notion_fetch({ id:edit.pageId }) });
+        receipts.push({ pageId:edit.pageId, ...verified, snapshot:prepared.snapshot });
+      }
+      return { status:'COMPLETED', resumed:true, receipts };
+    } catch (error) {
+      try { await broker({ action:'halt', batchId, reason:error.message }); } catch { /* Preserve HALTED. */ }
+      throw error;
+    } finally { await close(); }
+  }
+  return { run, resume, broker, close };
 })

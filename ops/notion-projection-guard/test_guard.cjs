@@ -130,8 +130,10 @@ function runnerFixture(t, fault) {
   const f=fixture(t);let writes=0,fetches=0,closed=false,retained=null;const pages=new Map([[A,page()],[B,page(B)]]);
   const tools={
     async mcp__codex_apps__remote_desktop_commander_start_process(){return {content:[{type:'text',text:'Process started with PID 123\nNPG/1 {"ready":true}'}]};},
-    async mcp__codex_apps__remote_desktop_commander_interact_with_process({input}){
+    async mcp__codex_apps__remote_desktop_commander_interact_with_process({input,wait_for_prompt}){
       const r=JSON.parse(input);let value;
+      if(fault==='prompt-regex' && r.action==='authorize' && wait_for_prompt!==false)
+        return {isError:true,content:[{type:'text',text:'Error interacting with process: Invalid regular expression: /^'+input.slice(0,500)}]};
       try{value={requestId:r.requestId,ok:true,result:f.b.handle(r)};}catch(e){value={requestId:r.requestId,ok:false,code:e.code,error:e.message};}
       if(r.action==='close')closed=true;
       if(fault==='cursor' && r.action==='prepare') {retained=value;return {content:[{type:'text',text:'Input sent; read output'}]};}
@@ -154,7 +156,7 @@ function runnerFixture(t, fault) {
     },
     async mcp__codex_apps__notion_notion_get_async_task(){return {content:[{type:'text',text:'Failed'}],structuredContent:{status:'failed'}};}
   };
-  return {runner:createRunner(tools,{deviceId:'known',command:'known'}),newRunner:()=>createRunner(tools,{deviceId:'known',command:'known'}),get writes(){return writes;},get fetches(){return fetches;},get closed(){return closed;},pages,f};
+  return {runner:createRunner(tools,{deviceId:'known',command:'known'}),newRunner:()=>createRunner(tools,{deviceId:'known',command:'known'}),get writes(){return writes;},get fetches(){return fetches;},get closed(){return closed;},pages,f,tools};
 }
 test('real orchestration uses broker requests, fresh pre/post reads and sequential pages',async t=>{
   const f=runnerFixture(t);const r=await f.runner.run('observation',[edit(),edit(B)]);
@@ -176,4 +178,71 @@ test('DC consumed cursor: retained response by exact ID avoids resend and permit
 test('native Notion content-only JSON ACK is recognized and then fully read back',async t=>{
   const f=runnerFixture(t,'content-only');assert.equal((await f.runner.run('observation',[edit(),edit(B)])).status,'COMPLETED');
   assert.equal(f.writes,2);assert.equal(f.fetches,6);
+});
+
+test('large JSON with regex metacharacters never enters DC prompt matching',async t=>{
+  const f=runnerFixture(t,'prompt-regex');
+  f.pages.set(A,page(A,body()+('[{\\ ⭐ 한국어 '.repeat(150000))));
+  assert.equal((await f.runner.run('observation',[edit()])).status,'COMPLETED');
+  assert.equal(f.writes,1);
+});
+
+function haltAuthorization(b, receipt) {
+  const error='REMOTE_ERROR: Error interacting with process: Invalid regular expression: /^\\{"action":"authorize","batchId":"observation","ticket":'+JSON.stringify(receipt.ticket);
+  b.handle({action:'halt',batchId:'observation',reason:error});
+  return error;
+}
+function repairInput(b, action, extra={}) {
+  const state=b.handle({action:'status'}).batches.observation;
+  return {action,batchId:'observation',planHash:state.planHash,expectedError:state.error,...extra};
+}
+test('explicit recovery keeps the same canonical batch, ticket and page index',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);
+  const first=prepare(b);authorize(b,first);verify(b,first);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  rejects('RECONCILE_ORDER',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)})));
+  b.handle(repairInput(b,'reconcile_verified',{index:0,page:page(A,body(newStr))}));
+  const result=b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)}));
+  assert.equal(result.status,'PREPARED');assert.equal(result.next,1);
+  assert.equal(b.state.batches.observation.receipt.ticket,pending.ticket);
+  assert.equal(b.state.batches.observation.reconciliations[0].priorVerified,1);
+  authorize(b,pending,page(B));assert.equal(verify(b,pending,page(B,body(newStr))).status,'COMPLETED');
+});
+test('completed receipt/protected properties drift blocks recovery without clearing HALTED',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);const a=prepare(b);authorize(b,a);verify(b,a);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  for(const p of [page(A,body(newStr)+'new own RELEASE'),page(A,body(newStr),{title:'changed'})])
+    rejects('RECONCILE_CHANGED',()=>b.handle(repairInput(b,'reconcile_verified',{index:0,page:p})));
+  assert.equal(b.state.batches.observation.status,'HALTED');
+});
+test('changed current preimage, revision or applied output never reauthorizes',t=>{
+  const {b}=fixture(t);begin(b);const pending=prepare(b);haltAuthorization(b,pending);
+  for(const p of [page(A,body()+'new own RELEASE'),page(A,body(),{title:'changed'}),page(A,body(),{title:'Test'},'later'),page(A,body(newStr))])
+    rejects('RECONCILE_CHANGED',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:p})));
+  assert.equal(b.state.batches.observation.status,'HALTED');assert.equal(b.state.batches.observation.next,0);
+});
+test('other failures, changed plan/error/ticket and tampered snapshots remain blocked',t=>{
+  const {b}=fixture(t);begin(b);const pending=prepare(b);haltAuthorization(b,pending);
+  const good=repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page()});
+  for(const changes of [{planHash:'changed'},{expectedError:'changed'},{ticket:'changed'}])
+    rejects('RECONCILE_IDENTITY',()=>b.handle({...good,...changes}));
+  const snapshot=JSON.parse(fs.readFileSync(pending.snapshot));snapshot.page.body+='changed';fs.writeFileSync(pending.snapshot,JSON.stringify(snapshot));
+  rejects('PERSISTENCE',()=>b.handle(good));
+  b.state.batches.observation.error='READBACK_MISMATCH';
+  rejects('RECONCILE_SCOPE',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page()})));
+  assert.equal(b.state.batches.observation.status,'HALTED');
+});
+test('recovery after restart must fresh-check every earlier verified page again',t=>{
+  const f=fixture(t);begin(f.b,[edit(),edit(B)]);const a=prepare(f.b);authorize(f.b,a);verify(f.b,a);
+  const pending=prepare(f.b,page(B));haltAuthorization(f.b,pending);
+  f.b.handle(repairInput(f.b,'reconcile_verified',{index:0,page:page(A,body(newStr))}));f.restart();
+  rejects('RECONCILE_ORDER',()=>f.b.handle(repairInput(f.b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)})));
+});
+test('runner explicitly resumes same halted authorization with one remaining write',async t=>{
+  const f=runnerFixture(t);begin(f.f.b,[edit(),edit(B)]);
+  const a=prepare(f.f.b);authorize(f.f.b,a);verify(f.f.b,a);f.pages.set(A,page(A,body(newStr)));
+  const pending=prepare(f.f.b,page(B));haltAuthorization(f.f.b,pending);
+  const planHash=f.f.b.state.batches.observation.planHash;
+  const result=await f.runner.resume('observation',planHash);
+  assert.equal(result.status,'COMPLETED');assert.equal(f.writes,1);assert.equal(f.closed,true);
 });

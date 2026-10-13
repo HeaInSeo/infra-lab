@@ -151,6 +151,7 @@ class Broker {
     catch { fail('LOCKED', 'Existing broker lock requires owner inspection'); }
     syncDir(this.root);
     this.state = fs.existsSync(this.file) ? read(this.file) : { version: 1, batches: {}, active: null };
+    this.recovery = null;
   }
   close() { fs.unlinkSync(this.lock); syncDir(this.root); }
   save() { atomic(this.file, this.state); }
@@ -161,6 +162,83 @@ class Broker {
     return b;
   }
   snapshot(batchId, n) { return path.join(this.root, hash(batchId) + '-' + n + '.json'); }
+  reconcile(input) {
+    const { batchId, planHash, expectedError, action } = input;
+    const b = this.state.batches[batchId];
+    if (this.state.active !== batchId || !b || b.status !== 'HALTED' ||
+        b.planHash !== planHash || hash(JSON.stringify(b.edits)) !== planHash ||
+        b.error !== expectedError || !b.receipt)
+      fail('RECONCILE_IDENTITY', 'Exact halted batch, immutable plan and error required');
+    // This narrowly admits the observed DC failure while awaiting authorize.
+    // A Notion/async/readback failure or an unknown lost write cannot retry.
+    if (!b.error.startsWith('REMOTE_ERROR: Error interacting with process: Invalid regular expression: ') ||
+        !b.error.includes('"action":"authorize"') || !b.error.includes(JSON.stringify(batchId)) ||
+        !b.error.includes(JSON.stringify(b.receipt.ticket)))
+      fail('RECONCILE_SCOPE', 'Only an unwritten DC authorize prompt failure can be reconciled');
+    for (const edit of b.edits) {
+      validateEdit(edit, this.policy);
+      if (!this.policy.canaryPages.includes(edit.pageId) &&
+          (!this.policy.productionEnabled || !this.policy.productionPages.includes(edit.pageId)))
+        fail('PRODUCTION_HOLD', 'Recovery cannot enlarge the writable page scope');
+    }
+    const checkSnapshot = (snapshot, index) => {
+      if (snapshot.batchId !== batchId || snapshot.index !== index ||
+          JSON.stringify(snapshot.edit) !== JSON.stringify(b.edits[index]) ||
+          hash(snapshot.page.body) !== snapshot.bodyHash ||
+          hash(snapshot.page.properties) !== snapshot.propertiesHash ||
+          hash(snapshot.expected) !== snapshot.expectedHash ||
+          plan(snapshot.page, snapshot.edit).expected !== snapshot.expected)
+        fail('PERSISTENCE', 'Canonical snapshot changed');
+    };
+    if (action === 'reconcile_verified') {
+      const index = input.index;
+      if (!Number.isInteger(index) || index < 0 || index >= b.next)
+        fail('RECONCILE_ORDER', 'Only prior verified pages can be checked');
+      if (index === 0) this.recovery = { batchId, planHash, expectedError, next:0 };
+      const recovery = this.recovery;
+      if (!recovery || recovery.batchId !== batchId || recovery.planHash !== planHash ||
+          recovery.expectedError !== expectedError || recovery.next !== index)
+        fail('RECONCILE_ORDER', 'Check every prior receipt in canonical order');
+      const file = this.snapshot(batchId, index);
+      const snapshot = read(file), verified = read(file + '.verified.json');
+      checkSnapshot(snapshot, index);
+      if (verified.bodyHash !== snapshot.expectedHash || verified.page.body !== snapshot.expected ||
+          verified.page.properties !== snapshot.page.properties)
+        fail('PERSISTENCE', 'Durable verified receipt changed');
+      const page = pageData(input.page, b.edits[index].pageId);
+      if (page.body !== verified.page.body || page.properties !== verified.page.properties ||
+          page.revision !== verified.page.revision)
+        fail('RECONCILE_CHANGED', 'An already verified page changed; keep the barrier');
+      recovery.next++;
+      return { status:'HALTED', checked:index, next:b.next, protectedContent:'UNCHANGED' };
+    }
+    if (input.ticket !== b.receipt.ticket)
+      fail('RECONCILE_IDENTITY', 'Keep the original immutable write ticket');
+    if (b.next > 0 && (!this.recovery || this.recovery.batchId !== batchId ||
+        this.recovery.planHash !== planHash || this.recovery.expectedError !== expectedError ||
+        this.recovery.next !== b.next))
+      fail('RECONCILE_ORDER', 'Freshly verify every completed page before resuming');
+    const snapshot = read(b.receipt.snapshot);
+    if (b.receipt.snapshot !== this.snapshot(batchId, b.next) ||
+        hash(JSON.stringify(snapshot)) !== b.receipt.snapshotHash || snapshot.ticket !== input.ticket)
+      fail('PERSISTENCE', 'Immutable pending snapshot changed');
+    checkSnapshot(snapshot, b.next);
+    const page = pageData(input.page, b.edits[b.next].pageId);
+    if (page.body !== snapshot.page.body || page.properties !== snapshot.page.properties ||
+        page.revision !== snapshot.page.revision)
+      fail('RECONCILE_CHANGED', 'Pending page must still equal its full preimage; no write is acknowledged');
+    // Persist an audit trail. Do not advance next, invent a verified receipt,
+    // remove snapshots, change edits, or accept an already-written output.
+    b.reconciliations = [...(b.reconciliations ?? []), {
+      kind:'UNWRITTEN_DC_AUTHORIZATION', at:new Date().toISOString(), index:b.next,
+      ticket:input.ticket, planHash, error:expectedError, priorVerified:b.next,
+      bodyHash:hash(page.body), propertiesHash:hash(page.properties)
+    }];
+    b.status = 'PREPARED';
+    this.recovery = null;
+    this.save();
+    return { status:'PREPARED', next:b.next, ticket:input.ticket, protectedContent:'UNCHANGED' };
+  }
   handle(input) {
     const { action, batchId } = input;
     if (action === 'status') return clone(this.state);
@@ -190,6 +268,7 @@ class Broker {
       this.state.batches[batchId] = { planHash: key, edits: clone(edits), next: 0, status: 'READY', receipt: null };
       this.state.active = batchId; this.save(); return { status: 'READY', next: 0 };
     }
+    if (action === 'reconcile_verified' || action === 'reconcile_unwritten') return this.reconcile(input);
     const b = this.current(batchId), edit = b.edits[b.next];
     if (action === 'halt') {
       b.status = 'HALTED'; b.error = String(input.reason ?? 'Connector or runner failed').slice(0,1000);
