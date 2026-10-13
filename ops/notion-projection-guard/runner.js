@@ -131,11 +131,9 @@
       if (state.active !== batchId || !batch || batch.planHash !== expectedPlanHash ||
           batch.status !== 'HALTED' || !batch.receipt) throw new Error('RECONCILE_IDENTITY');
       const identity = { batchId, planHash:expectedPlanHash, expectedError:batch.error };
-      // Recheck every durable completed receipt; these reads issue no mutation.
-      for (let index=0; index<batch.next; index++) {
-        await broker({ action:'reconcile_verified', ...identity, index,
-          page:await tools.mcp__codex_apps__notion_fetch({ id:batch.edits[index].pageId }) });
-      }
+      // Earlier pages already passed full preservation checks. Validate their
+      // durable receipts, then leave any subsequent worker records untouched.
+      await broker({ action:'reconcile_receipts', ...identity });
       await broker({ action:'reconcile_unwritten', ...identity, ticket:batch.receipt.ticket,
         page:await tools.mcp__codex_apps__notion_fetch({ id:batch.edits[batch.next].pageId }) });
       for (let index=batch.next; index<batch.edits.length; index++) {

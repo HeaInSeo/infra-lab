@@ -98,17 +98,20 @@ the exact protocol request ID. Page JSON is never used as a prompt expression.
 
 An explicitly invoked runner.resume(batchId, expectedPlanHash) can reconcile
 only the observed DC invalid-prompt-regex failure while awaiting authorize.
-It requires the original HALTED batch, unchanged plan/error/ticket, intact private
-snapshots, and fresh full body/properties/revision matches for every earlier
-verified page and the unwritten pending page. An already-applied output, changed
-worker record, other transport error, lost Notion ACK, async failure or readback
-mismatch remains blocked.
+It requires the original HALTED batch, unchanged plan/error/ticket and intact
+private snapshots. All earlier full protected-content verification receipts are
+revalidated against their preimages, planned output, native raw reads and hashes.
+Those completed pages receive zero recovery writes, preserving later worker
+records without restoring old snapshots. The unwritten pending page must still
+match its entire fresh body/properties/revision preimage. An already-applied
+output, changed pending page, other transport error, lost Notion ACK, async
+failure or readback mismatch remains blocked.
 
 The broker records a durable reconciliation audit and restores only PREPARED.
 It keeps the page index, ticket, snapshots and edits; it does not acknowledge a
 write or advance the batch. The ordinary fresh authorization, one connector
 mutation, full verification and durable receipt still run for each remaining
-page. A restarted recovery must recheck all earlier pages from index zero.
+page. A restarted recovery must recheck all earlier durable receipts from zero.
 Use the same state directory and exact canonical batch; no journal editing or
 new batch ID is a recovery path.
 

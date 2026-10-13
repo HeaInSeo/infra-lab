@@ -190,6 +190,32 @@ class Broker {
           plan(snapshot.page, snapshot.edit).expected !== snapshot.expected)
         fail('PERSISTENCE', 'Canonical snapshot changed');
     };
+    if (action === 'reconcile_receipts') {
+      // Completed pages already have full protected-content verification.
+      // Revalidate that immutable evidence; never write them again or restore
+      // an old page over a worker's later legitimate records.
+      const receipts = [];
+      this.recovery = null;
+      for (let index=0; index<b.next; index++) {
+        const file=this.snapshot(batchId,index);
+        const snapshot=read(file), verified=read(file+'.verified.json');
+        checkSnapshot(snapshot,index);
+        const preimage=pageData(snapshot.page.raw,b.edits[index].pageId);
+        const readback=pageData(verified.page.raw,b.edits[index].pageId);
+        if (preimage.body!==snapshot.page.body || preimage.properties!==snapshot.page.properties ||
+            preimage.revision!==snapshot.page.revision ||
+            verified.bodyHash!==snapshot.expectedHash || verified.page.body!==snapshot.expected ||
+            verified.page.properties!==snapshot.page.properties ||
+            readback.body!==verified.page.body || readback.properties!==verified.page.properties ||
+            readback.revision!==verified.page.revision)
+          fail('PERSISTENCE','Completed protected-content receipt changed');
+        receipts.push({ index, pageId:b.edits[index].pageId,
+          snapshotHash:hash(JSON.stringify(snapshot)), verifiedHash:hash(JSON.stringify(verified)),
+          bodyHash:verified.bodyHash, verifiedAt:verified.at });
+      }
+      this.recovery={ batchId,planHash,expectedError,next:b.next,receipts,mode:'DURABLE_VERIFIED_RECEIPTS' };
+      return { status:'HALTED',next:b.next,priorVerified:b.next,receipts };
+    }
     if (action === 'reconcile_verified') {
       const index = input.index;
       if (!Number.isInteger(index) || index < 0 || index >= b.next)
@@ -232,7 +258,8 @@ class Broker {
     b.reconciliations = [...(b.reconciliations ?? []), {
       kind:'UNWRITTEN_DC_AUTHORIZATION', at:new Date().toISOString(), index:b.next,
       ticket:input.ticket, planHash, error:expectedError, priorVerified:b.next,
-      bodyHash:hash(page.body), propertiesHash:hash(page.properties)
+      bodyHash:hash(page.body), propertiesHash:hash(page.properties),
+      mode:this.recovery?.mode ?? 'FRESH_PRIOR_PAGES', verifiedReceipts:this.recovery?.receipts ?? []
     }];
     b.status = 'PREPARED';
     this.recovery = null;
@@ -268,7 +295,7 @@ class Broker {
       this.state.batches[batchId] = { planHash: key, edits: clone(edits), next: 0, status: 'READY', receipt: null };
       this.state.active = batchId; this.save(); return { status: 'READY', next: 0 };
     }
-    if (action === 'reconcile_verified' || action === 'reconcile_unwritten') return this.reconcile(input);
+    if (['reconcile_verified','reconcile_receipts','reconcile_unwritten'].includes(action)) return this.reconcile(input);
     const b = this.current(batchId), edit = b.edits[b.next];
     if (action === 'halt') {
       b.status = 'HALTED'; b.error = String(input.reason ?? 'Connector or runner failed').slice(0,1000);

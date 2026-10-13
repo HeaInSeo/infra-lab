@@ -246,3 +246,43 @@ test('runner explicitly resumes same halted authorization with one remaining wri
   const result=await f.runner.resume('observation',planHash);
   assert.equal(result.status,'COMPLETED');assert.equal(f.writes,1);assert.equal(f.closed,true);
 });
+
+test('resume preserves later worker records on a completed page without rewriting it',async t=>{
+  const f=runnerFixture(t);begin(f.f.b,[edit(),edit(B)]);
+  const a=prepare(f.f.b);authorize(f.f.b,a);verify(f.f.b,a);
+  const evolved=page(A,body(newStr)+'new genuine worker RELEASE v32',{title:'Test',session_id:'new-worker'},'2026-10-13T12:18:30Z');
+  f.pages.set(A,evolved);
+  const pending=prepare(f.f.b,page(B));haltAuthorization(f.f.b,pending);
+  const result=await f.runner.resume('observation',f.f.b.state.batches.observation.planHash);
+  assert.equal(result.status,'COMPLETED');assert.equal(f.writes,1);
+  assert.deepEqual(f.pages.get(A),evolved);
+  assert.equal(f.f.b.state.batches.observation.reconciliations[0].mode,'DURABLE_VERIFIED_RECEIPTS');
+});
+test('receipt-only recovery checks immutable evidence without issuing any old-page write',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);
+  const a=prepare(b);authorize(b,a);verify(b,a);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  const checked=b.handle(repairInput(b,'reconcile_receipts'));
+  assert.equal(checked.status,'HALTED');assert.equal(checked.priorVerified,1);
+  assert.equal(b.state.batches.observation.next,1);
+  const ready=b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)}));
+  assert.equal(ready.status,'PREPARED');assert.equal(ready.next,1);
+});
+test('a damaged durable verified receipt cannot unlock the current pending page',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);
+  const a=prepare(b);authorize(b,a);verify(b,a);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  const v=JSON.parse(fs.readFileSync(a.snapshot+'.verified.json'));v.page.body=v.page.body.replace(history,'');
+  fs.writeFileSync(a.snapshot+'.verified.json',JSON.stringify(v));
+  rejects('PERSISTENCE',()=>b.handle(repairInput(b,'reconcile_receipts')));
+  assert.equal(b.state.batches.observation.status,'HALTED');
+  rejects('RECONCILE_ORDER',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)})));
+});
+test('fresh pending-page drift after receipt checks blocks without acknowledging a write',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);
+  const a=prepare(b);authorize(b,a);verify(b,a);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  b.handle(repairInput(b,'reconcile_receipts'));
+  rejects('RECONCILE_CHANGED',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B,body(),{title:'new own record'})})));
+  assert.equal(b.state.batches.observation.status,'HALTED');assert.equal(b.state.batches.observation.next,1);
+});
