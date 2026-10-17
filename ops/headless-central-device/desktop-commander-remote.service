@@ -3,13 +3,12 @@ Description=Remote Desktop Commander for headless central supervision
 Documentation=https://github.com/desktop-commander/remote-desktop-commander/blob/main/docs/SETUP.md
 After=network-online.target
 Wants=network-online.target
-StartLimitIntervalSec=300
-StartLimitBurst=3
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 WorkingDirectory=%h/.local/share/desktop-commander-remote
-ExecStart=%h/.local/share/desktop-commander-remote/node_modules/.bin/desktop-commander remote --disable-no-sleep
+ExecStart=%h/.local/share/desktop-commander-remote/run-device.sh
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=30
