@@ -1,0 +1,9 @@
+{
+  "name": "infra-lab-headless-central-device",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned Remote Desktop Commander agent for the existing central supervisor",
+  "dependencies": {
+    "@wonderwhy-er/desktop-commander": "0.2.51"
+  }
+}
