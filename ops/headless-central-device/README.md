@@ -6,7 +6,7 @@ The existing hosted central supervisor can reach the development server directly
 
 This directory pins Remote Desktop Commander 0.2.51 and its dependency lock. Run `./install-user.sh` as the development-server user. It installs only a user service and does not start or enable it automatically. It requires Node.js 18+ and an existing systemd user manager. Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes` for operation after logout.
 
-Start `systemctl --user start desktop-commander-remote.service`, then read `journalctl --user -u desktop-commander-remote.service --since -2min`. Use the printed verification URL and code to authenticate this new server device with the same Remote Desktop Commander account as the existing assistant connection. This is the provider's OAuth device flow. Do not copy the laptop's saved session or create another account.
+Start `systemctl --user start desktop-commander-remote.service`, then read `journalctl _SYSTEMD_USER_UNIT=desktop-commander-remote.service --since -2min --no-pager -o cat`. Use the printed verification URL and code to authenticate this new server device with the same Remote Desktop Commander account as the existing assistant connection. This is the provider's OAuth device flow. The explicit user-unit journal selector also works on the development server's systemd 239, where the journal's --user filter does not return these records. Do not copy the laptop's saved session or create another account.
 
 After the device appears online, enable the unit: `systemctl --user enable desktop-commander-remote.service`. Verify its persistent session remains private (0600). Restart the service once and check that the same device reconnects without another browser login.
 
