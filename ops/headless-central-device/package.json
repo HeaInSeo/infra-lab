@@ -5,5 +5,8 @@
   "description": "Pinned Remote Desktop Commander agent for the existing central supervisor",
   "dependencies": {
     "@wonderwhy-er/desktop-commander": "0.2.51"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

@@ -4,13 +4,15 @@ The existing hosted central supervisor can reach the development server directly
 
 ## Install
 
-This directory pins Remote Desktop Commander 0.2.51 and its dependency lock. Run `./install-user.sh` as the development-server user. It installs only a user service and does not start or enable it automatically. It requires Node.js 18+ and an existing systemd user manager. Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes` for operation after logout.
+This directory pins Remote Desktop Commander 0.2.51 and its dependency lock. Run `./install-user.sh` as the development-server user. It installs only a user service and does not start or enable it automatically. It requires Node.js >=22.12.0 and an existing systemd user manager. The installer checks this before writing files and uses npm engine-strict; the pinned lock includes Puppeteer >=22.12.0 and Supabase >=22 requirements. Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes` for operation after logout.
 
 Start `systemctl --user start desktop-commander-remote.service`, then read `journalctl _SYSTEMD_USER_UNIT=desktop-commander-remote.service --since -2min --no-pager -o cat`. Use the printed verification URL and code to authenticate this new server device with the same Remote Desktop Commander account as the existing assistant connection. This is the provider's OAuth device flow. The explicit user-unit journal selector also works on the development server's systemd 239, where the journal's --user filter does not return these records. Do not copy the laptop's saved session or create another account.
 
 After the device appears online, enable the unit: `systemctl --user enable desktop-commander-remote.service`. Verify its persistent session remains private (0600). Restart the service once and check that the same device reconnects without another browser login.
 
 ## Central cutover
+
+Before cutover, record the prior transport device ID and fixed command in the existing central maintenance record so recovery can restore those fields without reverting later queue or ownership updates.
 
 1. Read the actual online server device ID from the connector. Check its user, host and user-service status using a direct device call.
 2. Check the original Notion projection guard's approved hashes, policy and journal. No unfinished batch is allowed before changing the central execution route.
@@ -22,7 +24,7 @@ The guard's allowlist, production policy, state directory, snapshots and raw-wri
 
 ## Recovery
 
-On a temporary network failure, the official agent reconnects. The user service restarts on process failure with a bounded start rate. A revoked or expired provider authorization requires authenticating this same device again; do not substitute laptop credentials. Disable only this unit to return to the previously recorded central route; do not alter the Operator or Guardrail units.
+On a temporary network failure, the official agent reconnects. The user service restarts on process failure with a bounded start rate. A revoked or expired provider authorization requires authenticating this same device again; do not substitute laptop credentials. To roll back a completed cutover, first fresh-read the canonical guard journal and current hosted prompt. Finish or recover any unfinished original batch through the normal guard procedure. Restore only the current prompt's transport device ID, fixed command and related transport instructions to the recorded prior route, verify that route is available, and read back the saved prompt. Preserve later queue, ownership and gate updates. Then stop and disable this service with `systemctl --user disable --now desktop-commander-remote.service` and verify it is inactive and disabled. If the prior route is unavailable, keep central writes read-only until the server route is repaired; do not claim a restored connection. Leave the Operator and Guardrail units unchanged.
 
 Official setup: https://github.com/desktop-commander/remote-desktop-commander/blob/main/docs/SETUP.md
 Session persistence: https://github.com/wonderwhy-er/DesktopCommanderMCP/blob/main/src/remote-device/README.md
