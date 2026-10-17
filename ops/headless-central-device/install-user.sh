@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-dc_source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+dc_source_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 dc_install_dir="$HOME/.local/share/desktop-commander-remote"
 dc_unit_dir="$HOME/.config/systemd/user"
 
