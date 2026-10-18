@@ -137,6 +137,8 @@ The fresh full page and revision must still match the saved unexpected readback.
 Only then does the broker save a verified receipt and reconciliation audit and
 complete that original batch. Other failures, multi-page recovery, changed links,
 concurrent worker records, tampered evidence and production holds stay blocked.
+Both recovery paths use the same canonical UUID scope check as initial admission,
+while retaining the exact original edit spelling and immutable plan hash.
 
 This entry point is never called automatically by `run` or `resume`. Its hashes
 come from a reviewed original incident, not from a replacement batch or a manual

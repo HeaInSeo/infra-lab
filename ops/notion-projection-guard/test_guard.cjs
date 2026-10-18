@@ -310,6 +310,24 @@ function legacyAutolink(b, edits=[edit(A,{newStr:'central_status=package-cli.sh 
     expectedError:'READBACK_MISMATCH',ticket:receipt.ticket,snapshotHash:batch.receipt.snapshotHash,
     actualHash:actual.actualHash,actualSnapshotHash:hash(JSON.stringify(actual)),page:p}};
 }
+for (const spelling of ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', A.toUpperCase()]) {
+  test('unwritten recovery accepts the original admitted UUID spelling: '+spelling,t=>{
+    const {b}=fixture(t);begin(b,[edit(spelling)]);
+    const pending=prepare(b);haltAuthorization(b,pending);
+    b.handle(repairInput(b,'reconcile_receipts'));
+    assert.equal(b.handle(repairInput(b,'reconcile_unwritten',{
+      ticket:pending.ticket,page:page()})).status,'PREPARED');
+    assert.equal(b.state.batches.observation.edits[0].pageId,spelling);
+    authorize(b,pending);assert.equal(verify(b,pending).status,'COMPLETED');
+  });
+  test('autolink recovery accepts the original admitted UUID spelling: '+spelling,t=>{
+    const {b}=fixture(t);const legacy=legacyAutolink(b,[edit(spelling,{
+      newStr:'central_status=package-cli.sh awaiting CI'})]);
+    const result=b.handle(legacy.input);
+    assert.equal(result.status,'COMPLETED');assert.equal(result.reconciliation.notionWrites,0);
+    assert.equal(b.state.batches.observation.edits[0].pageId,spelling);
+  });
+}
 test('reviewed legacy autolink recovery verifies complete saved and fresh pages without a write',t=>{
   const f=fixture(t);const legacy=legacyAutolink(f.b);f.restart();
   const out=f.b.handle(legacy.input);

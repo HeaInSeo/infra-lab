@@ -187,8 +187,9 @@ class Broker {
       fail('RECONCILE_IDENTITY', 'Exact single-page halted batch, immutable plan/ticket and snapshot required');
     const edit = b.edits[0];
     validateEdit(edit, this.policy);
-    if (!this.policy.canaryPages.includes(edit.pageId) &&
-        (!this.policy.productionEnabled || !this.policy.productionPages.includes(edit.pageId)))
+    const pageId = id(edit.pageId);
+    if (!this.policy.canaryPages.includes(pageId) &&
+        (!this.policy.productionEnabled || !this.policy.productionPages.includes(pageId)))
       fail('PRODUCTION_HOLD', 'Recovery cannot enlarge the writable page scope');
     const file = b.receipt.snapshot, snapshot = read(file), actual = read(file + '.actual.json');
     const preimage = pageData(snapshot.page.raw, edit.pageId);
@@ -247,8 +248,9 @@ class Broker {
       fail('RECONCILE_SCOPE', 'Only an unwritten DC authorize prompt failure can be reconciled');
     for (const edit of b.edits) {
       validateEdit(edit, this.policy);
-      if (!this.policy.canaryPages.includes(edit.pageId) &&
-          (!this.policy.productionEnabled || !this.policy.productionPages.includes(edit.pageId)))
+      const pageId = id(edit.pageId);
+      if (!this.policy.canaryPages.includes(pageId) &&
+          (!this.policy.productionEnabled || !this.policy.productionPages.includes(pageId)))
         fail('PRODUCTION_HOLD', 'Recovery cannot enlarge the writable page scope');
     }
     const checkSnapshot = (snapshot, index) => {
