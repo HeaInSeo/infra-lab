@@ -115,7 +115,34 @@ page. A restarted recovery must recheck all earlier durable receipts from zero.
 Use the same state directory and exact canonical batch; no journal editing or
 new batch ID is a recovery path.
 
+### Explicit recovery of the 2026-10-18 autolink mismatch
+
+Notion rendered one bare `package-cli.sh` in a central observation as
+`[package-cli.sh](http://package-cli.sh)`. The ordinary exact verifier correctly
+halted. It continues to reject normalization; no general readback cleanup is
+introduced. New batches reject unmarked hostname-shaped filenames and URLs
+before claiming the journal or fetching Notion. Use inline code or an explicit
+Markdown link so the planned representation is stable.
+
+The separately invoked `runner.reconcileAutolink(batchId, planHash,
+snapshotHash, actualHash, actualSnapshotHash)` reads Notion once and performs
+zero Notion mutations. It admits only a single-page, index-zero original
+`READBACK_MISMATCH` batch. The plan, original ticket, complete private preimage,
+complete unexpected readback and their hashes must match. The only permitted
+difference is the observed `package-cli.sh` autolink within the intended new
+literal; protected prefix, suffix and properties remain byte-for-byte equal.
+The fresh full page and revision must still match the saved unexpected readback.
+Only then does the broker save a verified receipt and reconciliation audit and
+complete that original batch. Other failures, multi-page recovery, changed links,
+concurrent worker records, tampered evidence and production holds stay blocked.
+
+This entry point is never called automatically by `run` or `resume`. Its hashes
+come from a reviewed original incident, not from a replacement batch or a manual
+journal reset. A subsequent normal update still uses fresh preflight, the single
+canonical state, protected-content verification and durable ACK.
+
 Run `node --test test_guard.cjs`. The suite exercises the 4,000-character range,
 tail loss, native child references, worker evidence, ambiguous scope, concurrent
 revision/properties, snapshot tampering/storage failure, lost ACK/restart,
 async failure and the actual connector orchestration's stop-before-next-write.
+

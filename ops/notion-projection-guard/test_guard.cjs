@@ -286,3 +286,89 @@ test('fresh pending-page drift after receipt checks blocks without acknowledging
   rejects('RECONCILE_CHANGED',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B,body(),{title:'new own record'})})));
   assert.equal(b.state.batches.observation.status,'HALTED');assert.equal(b.state.batches.observation.next,1);
 });
+
+function legacyAutolink(b, edits=[edit(A,{newStr:'central_status=package-cli.sh awaiting CI'})], actualBody) {
+  // A journal produced before AUTOLINK_RISK existed; upgrade the real persisted
+  // schema rather than allowing the new begin() to authorize this legacy text.
+  b.state.batches.observation={planHash:hash(JSON.stringify(edits)),edits:structuredClone(edits),
+    next:0,status:'READY',receipt:null};b.state.active='observation';b.save();
+  const receipt=prepare(b);authorize(b,receipt);
+  const rendered=edits[0].newStr.replace('package-cli.sh','[package-cli.sh](http://package-cli.sh)');
+  const p=page(A,actualBody??body(rendered),{title:'Test'},'2026-10-12T00:01:00Z');
+  rejects('READBACK_MISMATCH',()=>verify(b,receipt,p));
+  const batch=b.state.batches.observation;
+  const actual=JSON.parse(fs.readFileSync(receipt.snapshot+'.actual.json'));
+  return {p,receipt,input:{action:'reconcile_autolink',batchId:'observation',planHash:batch.planHash,
+    expectedError:'READBACK_MISMATCH',ticket:receipt.ticket,snapshotHash:batch.receipt.snapshotHash,
+    actualHash:actual.actualHash,actualSnapshotHash:hash(JSON.stringify(actual)),page:p}};
+}
+test('reviewed legacy autolink recovery verifies complete saved and fresh pages without a write',t=>{
+  const f=fixture(t);const legacy=legacyAutolink(f.b);f.restart();
+  const out=f.b.handle(legacy.input);
+  assert.equal(out.status,'COMPLETED');assert.equal(out.reconciliation.notionWrites,0);
+  assert.equal(f.b.state.active,null);assert.equal(f.b.state.batches.observation.next,1);
+  const verified=JSON.parse(fs.readFileSync(legacy.receipt.snapshot+'.verified.json'));
+  assert.equal(verified.page.body,legacy.p.structuredContent.text.split('<content>\n')[1].split('\n</content>')[0]);
+  assert.equal(verified.reconciliation.plannedExpectedHash,
+    JSON.parse(fs.readFileSync(legacy.receipt.snapshot)).expectedHash);
+  rejects('RECONCILE_IDENTITY',()=>f.b.handle(legacy.input));
+});
+test('legacy autolink recovery rejects fresh body, properties and revision drift while preserving HALTED',t=>{
+  const {b}=fixture(t);const legacy=legacyAutolink(b);
+  const current=legacy.p.structuredContent.text.split('<content>\n')[1].split('\n</content>')[0];
+  for(const p of [page(A,current+'new real RELEASE'),page(A,current,{title:'changed'}),
+    page(A,current,{title:'Test'},'2026-10-12T00:02:00Z')])
+    rejects('RECONCILE_CHANGED',()=>b.handle({...legacy.input,page:p}));
+  assert.equal(b.state.batches.observation.status,'HALTED');assert.equal(b.state.batches.observation.next,0);
+  assert.equal(fs.existsSync(legacy.receipt.snapshot+'.verified.json'),false);
+});
+for(const [name,render] of [
+  ['tail loss',s=>s.replace(history,'')],
+  ['different link destination',s=>s.replace('http://package-cli.sh','http://example.com')],
+  ['extra change inside intended literal',s=>s.replace('awaiting CI','approved')],
+  ['worker proof change',s=>s.replace('"session_id":"worker"','"session_id":"forged"')]
+])test('reviewed recovery does not admit '+name,t=>{
+  const {b}=fixture(t);const intended=body('central_status=[package-cli.sh](http://package-cli.sh) awaiting CI');
+  const legacy=legacyAutolink(b,undefined,render(intended));
+  rejects('RECONCILE_SCOPE',()=>b.handle(legacy.input));assert.equal(b.state.active,'observation');
+});
+test('reviewed recovery pins batch plan, ticket, both complete snapshots and original error',t=>{
+  const {b}=fixture(t);const legacy=legacyAutolink(b);
+  for(const changes of [{planHash:'wrong'},{ticket:'wrong'},{snapshotHash:'wrong'},{expectedError:'other'}])
+    rejects('RECONCILE_IDENTITY',()=>b.handle({...legacy.input,...changes}));
+  for(const changes of [{actualHash:'wrong'},{actualSnapshotHash:'wrong'}])
+    rejects('PERSISTENCE',()=>b.handle({...legacy.input,...changes}));
+  const p=JSON.parse(fs.readFileSync(legacy.receipt.snapshot+'.actual.json'));p.at='tampered';
+  fs.writeFileSync(legacy.receipt.snapshot+'.actual.json',JSON.stringify(p));
+  rejects('PERSISTENCE',()=>b.handle(legacy.input));assert.equal(b.state.batches.observation.status,'HALTED');
+});
+test('snapshot tampering, production hold and multi-page legacy plans cannot be acknowledged',t=>{
+  const f=fixture(t);const legacy=legacyAutolink(f.b);f.p.productionEnabled=false;
+  rejects('PRODUCTION_HOLD',()=>f.b.handle(legacy.input));f.p.productionEnabled=true;
+  const snap=JSON.parse(fs.readFileSync(legacy.receipt.snapshot));snap.expected+='changed';
+  fs.writeFileSync(legacy.receipt.snapshot,JSON.stringify(snap));
+  rejects('PERSISTENCE',()=>f.b.handle(legacy.input));
+  const other=fixture(t);const multi=legacyAutolink(other.b,
+    [edit(A,{newStr:'central_status=package-cli.sh awaiting CI'}),edit(B)]);
+  rejects('RECONCILE_IDENTITY',()=>other.b.handle(multi.input));
+});
+test('hostname-shaped new text rejects before the first fetch and before claiming the durable barrier',async t=>{
+  const f=runnerFixture(t);await assert.rejects(f.runner.run('new',[edit(A,{newStr:'tool=package-cli.sh'})]),/AUTOLINK_RISK/);
+  assert.equal(f.fetches,0);assert.equal(f.writes,0);assert.equal(f.f.b.state.active,null);
+});
+test('explicit code or Markdown links are admitted, escaped and unclosed markup is not',t=>{
+  for(const s of ['tool=`package-cli.sh`','tool=``package-cli.sh``','tool=[package-cli.sh](http://package-cli.sh)']) {
+    const {b}=fixture(t);assert.equal(begin(b,[edit(A,{newStr:s})]).status,'READY');
+  }
+  for(const s of ['tool=package-cli.sh','tool=`package-cli.sh','tool=\\`package-cli.sh\\`',
+    'tool=\\[package-cli.sh](http://package-cli.sh)','tool=https://example.com/file']) {
+    const {b}=fixture(t);rejects('AUTOLINK_RISK',()=>begin(b,[edit(A,{newStr:s})]));assert.equal(b.state.active,null);
+  }
+});
+test('runner explicit autolink reconciliation performs one fresh fetch and zero Notion mutations',async t=>{
+  const f=runnerFixture(t);const legacy=legacyAutolink(f.f.b);f.pages.set(A,legacy.p);
+  const i=legacy.input;
+  const result=await f.runner.reconcileAutolink(i.batchId,i.planHash,i.snapshotHash,i.actualHash,i.actualSnapshotHash);
+  assert.equal(result.status,'COMPLETED');assert.equal(f.fetches,1);assert.equal(f.writes,0);assert.equal(f.closed,true);
+});
+

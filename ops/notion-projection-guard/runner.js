@@ -154,5 +154,19 @@
       throw error;
     } finally { await close(); }
   }
-  return { run, resume, broker, close };
+  async function reconcileAutolink(batchId, expectedPlanHash, snapshotHash, actualHash, actualSnapshotHash) {
+    try {
+      const state = await broker({ action:'status' });
+      const batch = state.batches?.[batchId];
+      if (state.active !== batchId || !batch || batch.planHash !== expectedPlanHash ||
+          batch.status !== 'HALTED' || batch.error !== 'READBACK_MISMATCH' ||
+          batch.edits.length !== 1 || batch.next !== 0 || !batch.receipt)
+        throw new Error('RECONCILE_IDENTITY');
+      return await broker({ action:'reconcile_autolink', batchId, planHash:expectedPlanHash,
+        expectedError:'READBACK_MISMATCH', ticket:batch.receipt.ticket, snapshotHash, actualHash, actualSnapshotHash,
+        page:await tools.mcp__codex_apps__notion_fetch({ id:batch.edits[0].pageId }) });
+    } finally { await close(); }
+  }
+  return { run, resume, reconcileAutolink, broker, close };
 })
+

@@ -86,6 +86,14 @@ function validateEdit(edit, policy) {
   }
   if (edit.oldStr === edit.newStr) fail('NO_CHANGE', 'No-op is not an update');
 }
+function bareAutolinks(text) {
+  // Require explicit code/link markup for hostname-shaped filenames. Notion
+  // can turn these into links, invalidating the exact post-write comparison.
+  const plain = text.replace(/(?<!\\)(`{1,2})(?!`)([^`\\]+?)\1(?!`)/g, match => ' '.repeat(match.length))
+    .replace(/(?<!\\)\[[^\]\\\r\n]+\]\(https?:\/\/[^\s()\\]+\)/g, match => ' '.repeat(match.length));
+  return [...plain.matchAll(/\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}\b/gi)]
+    .map(match => match[0]);
+}
 function plan(page, edit) {
   const matches = headings(page.body).filter(h => h.text === edit.heading);
   if (matches.length !== 1) fail('AMBIGUOUS_SECTION', 'Central heading must occur exactly once');
@@ -162,6 +170,64 @@ class Broker {
     return b;
   }
   snapshot(batchId, n) { return path.join(this.root, hash(batchId) + '-' + n + '.json'); }
+  reconcileAutolink(input) {
+    const { batchId, planHash, ticket, snapshotHash, actualHash, actualSnapshotHash } = input;
+    const b = this.state.batches[batchId];
+    // This is an explicit, single-page legacy incident recovery, never a
+    // normalization rule in verify() and never a second Notion mutation.
+    if (!b || this.state.active !== batchId || b.status !== 'HALTED' ||
+        b.error !== 'READBACK_MISMATCH' || input.expectedError !== b.error ||
+        b.next !== 0 || b.edits.length !== 1 || b.planHash !== planHash ||
+        hash(JSON.stringify(b.edits)) !== planHash || !b.receipt || b.receipt.ticket !== ticket ||
+        b.receipt.snapshotHash !== snapshotHash || b.receipt.snapshot !== this.snapshot(batchId, 0))
+      fail('RECONCILE_IDENTITY', 'Exact single-page halted batch, immutable plan/ticket and snapshot required');
+    const edit = b.edits[0];
+    validateEdit(edit, this.policy);
+    if (!this.policy.canaryPages.includes(edit.pageId) &&
+        (!this.policy.productionEnabled || !this.policy.productionPages.includes(edit.pageId)))
+      fail('PRODUCTION_HOLD', 'Recovery cannot enlarge the writable page scope');
+    const file = b.receipt.snapshot, snapshot = read(file), actual = read(file + '.actual.json');
+    const preimage = pageData(snapshot.page.raw, edit.pageId);
+    const savedActual = pageData(actual.page.raw, edit.pageId);
+    if (hash(JSON.stringify(snapshot)) !== snapshotHash || snapshot.batchId !== batchId ||
+        snapshot.index !== 0 || snapshot.ticket !== ticket ||
+        JSON.stringify(snapshot.edit) !== JSON.stringify(edit) ||
+        snapshot.bodyHash !== hash(snapshot.page.body) ||
+        snapshot.propertiesHash !== hash(snapshot.page.properties) ||
+        snapshot.expectedHash !== hash(snapshot.expected) ||
+        preimage.body !== snapshot.page.body || preimage.properties !== snapshot.page.properties ||
+        preimage.revision !== snapshot.page.revision ||
+        plan(snapshot.page, edit).expected !== snapshot.expected ||
+        hash(JSON.stringify(actual)) !== actualSnapshotHash ||
+        actual.actualHash !== actualHash || hash(actual.page.body) !== actualHash ||
+        savedActual.body !== actual.page.body || savedActual.properties !== actual.page.properties ||
+        savedActual.revision !== actual.page.revision)
+      fail('PERSISTENCE', 'Canonical preimage or mismatched readback changed');
+    const token = 'package-cli.sh', rendered = '[package-cli.sh](http://package-cli.sh)';
+    const risks = bareAutolinks(edit.newStr);
+    if (risks.length !== 1 || risks[0] !== token || edit.newStr.split(token).length !== 2)
+      fail('RECONCILE_SCOPE', 'Only the independently reviewed package-cli.sh autolink is admitted');
+    const index = snapshot.page.body.indexOf(edit.oldStr);
+    const before = snapshot.page.body.slice(0, index);
+    const after = snapshot.page.body.slice(index + edit.oldStr.length);
+    const expected = before + edit.newStr.replace(token, rendered) + after;
+    if (hash(before) !== snapshot.beforeHash || hash(after) !== snapshot.afterHash ||
+        actual.page.body !== expected || actual.page.properties !== snapshot.page.properties)
+      fail('RECONCILE_SCOPE', 'Mismatch is not confined to the one reviewed autolink');
+    const fresh = pageData(input.page, edit.pageId);
+    if (fresh.body !== actual.page.body || fresh.properties !== actual.page.properties ||
+        fresh.revision !== actual.page.revision)
+      fail('RECONCILE_CHANGED', 'Fresh complete page must still equal the saved mismatched readback');
+    const at = new Date().toISOString();
+    const evidence = { kind:'REVIEWED_PACKAGE_CLI_AUTOLINK', at, planHash, snapshotHash, actualHash, actualSnapshotHash,
+      ticket, plannedExpectedHash:snapshot.expectedHash, protectedContent:'UNCHANGED', notionWrites:0 };
+    atomic(file + '.verified.json', { page:fresh, bodyHash:hash(fresh.body), at, reconciliation:evidence });
+    b.reconciliations = [...(b.reconciliations ?? []), evidence];
+    b.next = 1; b.receipt = null; b.status = 'COMPLETED'; this.state.active = null;
+    this.save();
+    return { status:'COMPLETED', next:1, protectedContent:'UNCHANGED', bodyHash:hash(fresh.body),
+      reconciliation:evidence };
+  }
   reconcile(input) {
     const { batchId, planHash, expectedError, action } = input;
     const b = this.state.batches[batchId];
@@ -291,10 +357,13 @@ class Broker {
         if (previous.planHash !== key) fail('BATCH_REUSE', 'Observation ID cannot bind different edits');
         return { status: previous.status, next: previous.next, reused: true };
       }
+      if (edits.some(edit => bareAutolinks(edit.newStr).length))
+        fail('AUTOLINK_RISK', 'Wrap hostname-shaped filenames and URLs in inline code or an explicit Markdown link');
       if (this.state.active) fail('UNRESOLVED_BATCH', 'Previous batch must verify or be reconciled before any new batch');
       this.state.batches[batchId] = { planHash: key, edits: clone(edits), next: 0, status: 'READY', receipt: null };
       this.state.active = batchId; this.save(); return { status: 'READY', next: 0 };
     }
+    if (action === 'reconcile_autolink') return this.reconcileAutolink(input);
     if (['reconcile_verified','reconcile_receipts','reconcile_unwritten'].includes(action)) return this.reconcile(input);
     const b = this.current(batchId), edit = b.edits[b.next];
     if (action === 'halt') {
@@ -383,3 +452,4 @@ if (require.main === module) {
   for (const signal of ['SIGTERM','SIGINT','SIGHUP']) process.on(signal, () => { close(); process.exit(0); });
 }
 module.exports = { Broker, GuardError, hash, pageData, plan, validateEdit, atomic };
+
