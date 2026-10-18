@@ -94,6 +94,10 @@ function bareAutolinks(text) {
   return [...plain.matchAll(/\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}\b/gi)]
     .map(match => match[0]);
 }
+function stableNewText(edit) {
+  if (bareAutolinks(edit.newStr).length)
+    fail('AUTOLINK_RISK', 'Wrap hostname-shaped filenames and URLs in inline code or an explicit Markdown link');
+}
 function plan(page, edit) {
   const matches = headings(page.body).filter(h => h.text === edit.heading);
   if (matches.length !== 1) fail('AMBIGUOUS_SECTION', 'Central heading must occur exactly once');
@@ -355,10 +359,10 @@ class Broker {
       const previous = Object.hasOwn(this.state.batches,batchId) ? this.state.batches[batchId] : null;
       if (previous) {
         if (previous.planHash !== key) fail('BATCH_REUSE', 'Observation ID cannot bind different edits');
+        if (previous.status === 'READY') previous.edits.slice(previous.next).forEach(stableNewText);
         return { status: previous.status, next: previous.next, reused: true };
       }
-      if (edits.some(edit => bareAutolinks(edit.newStr).length))
-        fail('AUTOLINK_RISK', 'Wrap hostname-shaped filenames and URLs in inline code or an explicit Markdown link');
+      edits.forEach(stableNewText);
       if (this.state.active) fail('UNRESOLVED_BATCH', 'Previous batch must verify or be reconciled before any new batch');
       this.state.batches[batchId] = { planHash: key, edits: clone(edits), next: 0, status: 'READY', receipt: null };
       this.state.active = batchId; this.save(); return { status: 'READY', next: 0 };
@@ -372,6 +376,7 @@ class Broker {
     }
     if (action === 'prepare') {
       if (b.status !== 'READY') fail('PAGE_BARRIER', 'Prior page has not verified');
+      stableNewText(edit);
       const page = pageData(input.page, edit.pageId), p = plan(page, edit);
       const ticket = crypto.randomUUID();
       const snapshot = { version: 1, batchId, index: b.next, ticket, edit, page,
@@ -391,6 +396,7 @@ class Broker {
     if (hash(JSON.stringify(snapshot)) !== b.receipt.snapshotHash) fail('PERSISTENCE', 'Immutable snapshot changed');
     if (action === 'authorize') {
       if (b.status !== 'PREPARED') fail('PAGE_BARRIER', 'Write has already been authorized; never retry it');
+      stableNewText(edit);
       const page = pageData(input.page, edit.pageId);
       if (page.body !== snapshot.page.body || page.properties !== snapshot.page.properties ||
           page.revision !== snapshot.page.revision) fail('CONCURRENT_CHANGE', 'Page changed since the saved preimage');

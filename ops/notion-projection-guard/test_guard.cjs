@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
-const { Broker, hash } = require('./broker.cjs');
+const { Broker, hash, pageData, plan, atomic } = require('./broker.cjs');
 const A='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', B='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const heading='## CURRENT CENTRAL OBSERVATION · test';
 const oldStr='central_status=WAIT', newStr='central_status=VERIFIED';
@@ -292,7 +292,15 @@ function legacyAutolink(b, edits=[edit(A,{newStr:'central_status=package-cli.sh 
   // schema rather than allowing the new begin() to authorize this legacy text.
   b.state.batches.observation={planHash:hash(JSON.stringify(edits)),edits:structuredClone(edits),
     next:0,status:'READY',receipt:null};b.state.active='observation';b.save();
-  const receipt=prepare(b);authorize(b,receipt);
+  // Seed the exact WRITE_PENDING snapshot made by the old binary. The new
+  // binary must not prepare or authorize this unsafe text again.
+  const preimage=pageData(page(),A),planned=plan(preimage,edits[0]);
+  const snapshot={version:1,batchId:'observation',index:0,ticket:'legacy-ticket',edit:edits[0],page:preimage,
+    expected:planned.expected,beforeHash:planned.beforeHash,afterHash:planned.afterHash,
+    bodyHash:hash(preimage.body),expectedHash:hash(planned.expected),propertiesHash:hash(preimage.properties)};
+  const file=b.snapshot('observation',0);atomic(file,snapshot);
+  const receipt={ticket:snapshot.ticket,snapshot:file,snapshotHash:hash(JSON.stringify(snapshot))};
+  b.state.batches.observation.status='WRITE_PENDING';b.state.batches.observation.receipt=receipt;b.save();
   const rendered=edits[0].newStr.replace('package-cli.sh','[package-cli.sh](http://package-cli.sh)');
   const p=page(A,actualBody??body(rendered),{title:'Test'},'2026-10-12T00:01:00Z');
   rejects('READBACK_MISMATCH',()=>verify(b,receipt,p));
@@ -370,4 +378,28 @@ test('runner explicit autolink reconciliation performs one fresh fetch and zero 
   const i=legacy.input;
   const result=await f.runner.reconcileAutolink(i.batchId,i.planHash,i.snapshotHash,i.actualHash,i.actualSnapshotHash);
   assert.equal(result.status,'COMPLETED');assert.equal(f.fetches,1);assert.equal(f.writes,0);assert.equal(f.closed,true);
+});
+test('legacy READY replay cannot bypass autolink preflight or issue a Notion mutation',async t=>{
+  const f=runnerFixture(t);const edits=[edit(A,{newStr:'central_status=package-cli.sh awaiting CI'})];
+  f.f.b.state.batches.observation={planHash:hash(JSON.stringify(edits)),edits,next:0,status:'READY',receipt:null};
+  f.f.b.state.active='observation';f.f.b.save();
+  await assert.rejects(f.runner.run('observation',edits),/AUTOLINK_RISK/);
+  assert.equal(f.fetches,0);assert.equal(f.writes,0);assert.equal(f.f.b.state.batches.observation.status,'HALTED');
+});
+test('direct prepare and legacy PREPARED authorization both reject unsafe text before write authorization',t=>{
+  const f=fixture(t);const legacy=legacyAutolink(f.b);const b=f.b.state.batches.observation;
+  b.status='READY';b.receipt=null;f.b.save();
+  rejects('AUTOLINK_RISK',()=>prepare(f.b));assert.equal(b.status,'READY');
+  b.status='PREPARED';b.receipt=legacy.receipt;f.b.save();
+  rejects('AUTOLINK_RISK',()=>authorize(f.b,legacy.receipt));assert.equal(b.status,'PREPARED');
+});
+test('completed legacy autolink batch replays as consumed without rejecting or rewriting it',t=>{
+  const {b}=fixture(t);const legacy=legacyAutolink(b);const edits=structuredClone(b.state.batches.observation.edits);
+  b.handle(legacy.input);assert.equal(begin(b,edits).status,'COMPLETED');assert.equal(b.state.active,null);
+});
+test('READY replay validates remaining pages while preserving a previously completed safe page',t=>{
+  const {b}=fixture(t);const edits=[edit(),edit(B,{newStr:'central_status=package-cli.sh awaiting CI'})];
+  b.state.batches.observation={planHash:hash(JSON.stringify(edits)),edits,next:1,status:'READY',receipt:null};
+  b.state.active='observation';b.save();
+  rejects('AUTOLINK_RISK',()=>begin(b,edits));assert.equal(b.state.batches.observation.next,1);
 });

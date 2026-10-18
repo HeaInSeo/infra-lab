@@ -123,6 +123,8 @@ halted. It continues to reject normalization; no general readback cleanup is
 introduced. New batches reject unmarked hostname-shaped filenames and URLs
 before claiming the journal or fetching Notion. Use inline code or an explicit
 Markdown link so the planned representation is stable.
+Replayed legacy READY batches validate every remaining edit as well. The same
+check runs in prepare and authorize, so a saved PREPARED ticket cannot bypass it.
 
 The separately invoked `runner.reconcileAutolink(batchId, planHash,
 snapshotHash, actualHash, actualSnapshotHash)` reads Notion once and performs
