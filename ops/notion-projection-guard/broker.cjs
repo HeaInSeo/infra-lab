@@ -86,17 +86,27 @@ function validateEdit(edit, policy) {
   }
   if (edit.oldStr === edit.newStr) fail('NO_CHANGE', 'No-op is not an update');
 }
-function bareAutolinks(text) {
+function plainMarkup(text) {
   // Require explicit code/link markup for hostname-shaped filenames. Notion
   // can turn these into links, invalidating the exact post-write comparison.
-  const plain = text.replace(/(?<!\\)(`{1,2})(?!`)([^`\\]+?)\1(?!`)/g, match => ' '.repeat(match.length))
+  return text.replace(/(?<!\\)(`{1,2})(?!`)([^`\\]+?)\1(?!`)/g, match => ' '.repeat(match.length))
     .replace(/(?<!\\)\[[^\]\\\r\n]+\]\(https?:\/\/[^\s()\\]+\)/g, match => ' '.repeat(match.length));
-  return [...plain.matchAll(/\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}\b/gi)]
+}
+function bareAutolinks(text) {
+  return [...plainMarkup(text).matchAll(/\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}\b/gi)]
     .map(match => match[0]);
 }
 function stableNewText(edit) {
   if (bareAutolinks(edit.newStr).length)
     fail('AUTOLINK_RISK', 'Wrap hostname-shaped filenames and URLs in inline code or an explicit Markdown link');
+  if (plainMarkup(edit.newStr).includes('->'))
+    fail('MARKDOWN_ESCAPE_RISK', 'Use a Unicode arrow or inline code instead of a plain ASCII arrow');
+}
+function reviewedArrowLiteral(edit) {
+  if (bareAutolinks(edit.newStr).length ||
+      plainMarkup(edit.newStr).split(' -> ').length !== 3 || edit.newStr.split('->').length !== 3)
+    fail('RECONCILE_SCOPE', 'Only the two observed plain central arrows are admitted');
+  return edit.newStr.replaceAll(' -> ', ' -\\> ');
 }
 function plan(page, edit) {
   const matches = headings(page.body).filter(h => h.text === edit.heading);
@@ -175,22 +185,32 @@ class Broker {
   }
   snapshot(batchId, n) { return path.join(this.root, hash(batchId) + '-' + n + '.json'); }
   reconcileAutolink(input) {
+    return this.reconcileRendering(input, 'package');
+  }
+  reconcileRendering(input, mode) {
+    if (!['package', 'arrows'].includes(mode)) fail('RECONCILE_SCOPE', 'Unknown rendering incident');
     const { batchId, planHash, ticket, snapshotHash, actualHash, actualSnapshotHash } = input;
     const b = this.state.batches[batchId];
-    // This is an explicit, single-page legacy incident recovery, never a
+    // These are separately invoked, pinned incident recoveries, never a
     // normalization rule in verify() and never a second Notion mutation.
     if (!b || this.state.active !== batchId || b.status !== 'HALTED' ||
         b.error !== 'READBACK_MISMATCH' || input.expectedError !== b.error ||
-        b.next !== 0 || b.edits.length !== 1 || b.planHash !== planHash ||
+        b.next !== 0 || b.edits.length !== (mode === 'package' ? 1 : 6) || b.planHash !== planHash ||
         hash(JSON.stringify(b.edits)) !== planHash || !b.receipt || b.receipt.ticket !== ticket ||
         b.receipt.snapshotHash !== snapshotHash || b.receipt.snapshot !== this.snapshot(batchId, 0))
-      fail('RECONCILE_IDENTITY', 'Exact single-page halted batch, immutable plan/ticket and snapshot required');
+      fail('RECONCILE_IDENTITY', 'Exact halted incident, immutable plan/ticket and snapshot required');
     const edit = b.edits[0];
-    validateEdit(edit, this.policy);
-    const pageId = id(edit.pageId);
-    if (!this.policy.canaryPages.includes(pageId) &&
-        (!this.policy.productionEnabled || !this.policy.productionPages.includes(pageId)))
-      fail('PRODUCTION_HOLD', 'Recovery cannot enlarge the writable page scope');
+    const seen = new Set();
+    for (const [index, planned] of b.edits.entries()) {
+      validateEdit(planned, this.policy);
+      const pageId = id(planned.pageId);
+      if (seen.has(pageId)) fail('RECONCILE_IDENTITY', 'Duplicate recovery page');
+      seen.add(pageId);
+      if (!this.policy.canaryPages.includes(pageId) &&
+          (!this.policy.productionEnabled || !this.policy.productionPages.includes(pageId)))
+        fail('PRODUCTION_HOLD', 'Recovery cannot enlarge the writable page scope');
+      if (index > 0) stableNewText(planned);
+    }
     const file = b.receipt.snapshot, snapshot = read(file), actual = read(file + '.actual.json');
     const preimage = pageData(snapshot.page.raw, edit.pageId);
     const savedActual = pageData(actual.page.raw, edit.pageId);
@@ -208,30 +228,56 @@ class Broker {
         savedActual.body !== actual.page.body || savedActual.properties !== actual.page.properties ||
         savedActual.revision !== actual.page.revision)
       fail('PERSISTENCE', 'Canonical preimage or mismatched readback changed');
-    const token = 'package-cli.sh', rendered = '[package-cli.sh](http://package-cli.sh)';
-    const risks = bareAutolinks(edit.newStr);
-    if (risks.length !== 1 || risks[0] !== token || edit.newStr.split(token).length !== 2)
-      fail('RECONCILE_SCOPE', 'Only the independently reviewed package-cli.sh autolink is admitted');
+    let renderedLiteral, kind;
+    if (mode === 'arrows') {
+      renderedLiteral = reviewedArrowLiteral(edit); kind = 'REVIEWED_CENTRAL_ARROW_ESCAPING';
+    } else {
+      const token = 'package-cli.sh', rendered = '[package-cli.sh](http://package-cli.sh)';
+      const risks = bareAutolinks(edit.newStr);
+      if (risks.length !== 1 || risks[0] !== token || edit.newStr.split(token).length !== 2)
+        fail('RECONCILE_SCOPE', 'Only the independently reviewed package-cli.sh autolink is admitted');
+      renderedLiteral = edit.newStr.replace(token, rendered); kind = 'REVIEWED_PACKAGE_CLI_AUTOLINK';
+    }
     const index = snapshot.page.body.indexOf(edit.oldStr);
     const before = snapshot.page.body.slice(0, index);
     const after = snapshot.page.body.slice(index + edit.oldStr.length);
-    const expected = before + edit.newStr.replace(token, rendered) + after;
+    const expected = before + renderedLiteral + after;
     if (hash(before) !== snapshot.beforeHash || hash(after) !== snapshot.afterHash ||
         actual.page.body !== expected || actual.page.properties !== snapshot.page.properties)
-      fail('RECONCILE_SCOPE', 'Mismatch is not confined to the one reviewed autolink');
+      fail('RECONCILE_SCOPE', 'Mismatch is not confined to the reviewed rendering difference');
     const fresh = pageData(input.page, edit.pageId);
     if (fresh.body !== actual.page.body || fresh.properties !== actual.page.properties ||
         fresh.revision !== actual.page.revision)
       fail('RECONCILE_CHANGED', 'Fresh complete page must still equal the saved mismatched readback');
     const at = new Date().toISOString();
-    const evidence = { kind:'REVIEWED_PACKAGE_CLI_AUTOLINK', at, planHash, snapshotHash, actualHash, actualSnapshotHash,
+    const evidence = { kind, at, planHash, snapshotHash, actualHash, actualSnapshotHash,
       ticket, plannedExpectedHash:snapshot.expectedHash, protectedContent:'UNCHANGED', notionWrites:0 };
     atomic(file + '.verified.json', { page:fresh, bodyHash:hash(fresh.body), at, reconciliation:evidence });
     b.reconciliations = [...(b.reconciliations ?? []), evidence];
-    b.next = 1; b.receipt = null; b.status = 'COMPLETED'; this.state.active = null;
+    b.next = 1; b.receipt = null; b.status = b.edits.length === 1 ? 'COMPLETED' : 'READY';
+    if (b.status === 'COMPLETED') this.state.active = null;
     this.save();
-    return { status:'COMPLETED', next:1, protectedContent:'UNCHANGED', bodyHash:hash(fresh.body),
+    return { status:b.status, next:1, protectedContent:'UNCHANGED', bodyHash:hash(fresh.body),
       reconciliation:evidence };
+  }
+  verifiedExpected(snapshot, verified, batch, index) {
+    const audit = verified.reconciliation;
+    if (!audit) return snapshot.expected;
+    if (index !== 0 || batch.edits.length !== 6 || audit.kind !== 'REVIEWED_CENTRAL_ARROW_ESCAPING' ||
+        !(batch.reconciliations ?? []).some(record => JSON.stringify(record) === JSON.stringify(audit)) ||
+        audit.planHash !== batch.planHash || audit.ticket !== snapshot.ticket ||
+        audit.snapshotHash !== hash(JSON.stringify(snapshot)) || audit.plannedExpectedHash !== snapshot.expectedHash ||
+        audit.protectedContent !== 'UNCHANGED' || audit.notionWrites !== 0 || verified.at !== audit.at)
+      fail('PERSISTENCE', 'Reviewed rendering receipt is not bound to the original audit');
+    const actual = read(this.snapshot(snapshot.batchId, index) + '.actual.json');
+    const saved = pageData(actual.page.raw, snapshot.edit.pageId);
+    const expected = plan(snapshot.page, { ...snapshot.edit, newStr:reviewedArrowLiteral(snapshot.edit) }).expected;
+    if (hash(JSON.stringify(actual)) !== audit.actualSnapshotHash || actual.actualHash !== audit.actualHash ||
+        hash(actual.page.body) !== audit.actualHash || actual.page.body !== expected ||
+        actual.page.properties !== snapshot.page.properties || saved.body !== actual.page.body ||
+        saved.properties !== actual.page.properties || saved.revision !== actual.page.revision)
+      fail('PERSISTENCE', 'Reviewed rendering evidence changed');
+    return expected;
   }
   reconcile(input) {
     const { batchId, planHash, expectedError, action } = input;
@@ -274,9 +320,10 @@ class Broker {
         checkSnapshot(snapshot,index);
         const preimage=pageData(snapshot.page.raw,b.edits[index].pageId);
         const readback=pageData(verified.page.raw,b.edits[index].pageId);
+        const expected=this.verifiedExpected(snapshot,verified,b,index);
         if (preimage.body!==snapshot.page.body || preimage.properties!==snapshot.page.properties ||
             preimage.revision!==snapshot.page.revision ||
-            verified.bodyHash!==snapshot.expectedHash || verified.page.body!==snapshot.expected ||
+            verified.bodyHash!==hash(expected) || verified.page.body!==expected ||
             verified.page.properties!==snapshot.page.properties ||
             readback.body!==verified.page.body || readback.properties!==verified.page.properties ||
             readback.revision!==verified.page.revision)
@@ -300,7 +347,8 @@ class Broker {
       const file = this.snapshot(batchId, index);
       const snapshot = read(file), verified = read(file + '.verified.json');
       checkSnapshot(snapshot, index);
-      if (verified.bodyHash !== snapshot.expectedHash || verified.page.body !== snapshot.expected ||
+      const expected=this.verifiedExpected(snapshot,verified,b,index);
+      if (verified.bodyHash !== hash(expected) || verified.page.body !== expected ||
           verified.page.properties !== snapshot.page.properties)
         fail('PERSISTENCE', 'Durable verified receipt changed');
       const page = pageData(input.page, b.edits[index].pageId);
@@ -370,6 +418,7 @@ class Broker {
       this.state.active = batchId; this.save(); return { status: 'READY', next: 0 };
     }
     if (action === 'reconcile_autolink') return this.reconcileAutolink(input);
+    if (action === 'reconcile_escaped_arrows') return this.reconcileRendering(input, 'arrows');
     if (['reconcile_verified','reconcile_receipts','reconcile_unwritten'].includes(action)) return this.reconcile(input);
     const b = this.current(batchId), edit = b.edits[b.next];
     if (action === 'halt') {

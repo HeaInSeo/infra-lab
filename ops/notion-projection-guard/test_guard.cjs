@@ -126,8 +126,8 @@ test('snapshot persistence failure yields no write authorization',t=>{
 });
 
 const createRunner=vm.runInNewContext(fs.readFileSync(path.join(__dirname,'runner.js'),'utf8'),{setTimeout:(fn)=>setTimeout(fn,0)});
-function runnerFixture(t, fault) {
-  const f=fixture(t);let writes=0,fetches=0,closed=false,retained=null;const pages=new Map([[A,page()],[B,page(B)]]);
+function runnerFixture(t, fault, policy={}) {
+  const f=fixture(t,policy);let writes=0,fetches=0,closed=false,retained=null;const pages=new Map([[A,page()],[B,page(B)]]);
   const tools={
     async mcp__codex_apps__remote_desktop_commander_start_process(){return {content:[{type:'text',text:'Process started with PID 123\nNPG/1 {"ready":true}'}]};},
     async mcp__codex_apps__remote_desktop_commander_interact_with_process({input,wait_for_prompt}){
@@ -420,4 +420,56 @@ test('READY replay validates remaining pages while preserving a previously compl
   b.state.batches.observation={planHash:hash(JSON.stringify(edits)),edits,next:1,status:'READY',receipt:null};
   b.state.active='observation';b.save();
   rejects('AUTOLINK_RISK',()=>begin(b,edits));assert.equal(b.state.batches.observation.next,1);
+});
+
+const arrowIds=[A,B,...['c','d','e','f'].map(c=>c.repeat(32))];
+function legacyArrows(b, render=s=>s.replaceAll(' -> ',' -\\> ')) {
+  const edits=arrowIds.map((p,i)=>edit(p,{newStr:i===0?'central_status=writer -> review -> landing':newStr}));
+  const legacy=legacyAutolink(b,edits,render(body(edits[0].newStr)));
+  legacy.input.action='reconcile_escaped_arrows';return {...legacy,edits};
+}
+test('plain ASCII arrows reject before fetch or durable admission; code and Unicode arrows remain stable',async t=>{
+  const f=runnerFixture(t);
+  await assert.rejects(f.runner.run('arrows',[edit(A,{newStr:'central_status=writer -> review'})]),/MARKDOWN_ESCAPE_RISK/);
+  assert.equal(f.fetches,0);assert.equal(f.writes,0);assert.equal(f.f.b.state.active,null);
+  for(const s of ['central_status=writer → review','central_status=`writer -> review`']) {
+    const {b}=fixture(t);assert.equal(begin(b,[edit(A,{newStr:s})]).status,'READY');
+  }
+});
+test('explicit arrow recovery verifies page zero, then the original plan writes only the remaining five pages',async t=>{
+  const f=runnerFixture(t,undefined,{productionPages:arrowIds});const legacy=legacyArrows(f.f.b);
+  f.pages.set(A,legacy.p);for(const p of arrowIds.slice(1))f.pages.set(p,page(p));
+  const recovered=await f.runner.broker(legacy.input);
+  assert.equal(recovered.status,'READY');assert.equal(recovered.next,1);
+  assert.equal(recovered.reconciliation.notionWrites,0);assert.equal(f.writes,0);
+  assert.equal((await f.runner.run('observation',legacy.edits)).status,'COMPLETED');
+  assert.equal(f.writes,5);assert.deepEqual(f.pages.get(A),legacy.p);
+});
+for(const [name,render] of [
+  ['only one arrow escaped',s=>s.replace(' -> ',' -\\> ')],
+  ['protected tail lost',s=>s.replaceAll(' -> ',' -\\> ').replace(history,'')],
+  ['literal wording changed',s=>s.replaceAll(' -> ',' -\\> ').replace('review','approved')]
+])test('arrow recovery rejects '+name,t=>{
+  const {b}=fixture(t,{productionPages:arrowIds});const legacy=legacyArrows(b,render);
+  rejects('RECONCILE_SCOPE',()=>b.handle(legacy.input));assert.equal(b.state.batches.observation.status,'HALTED');
+});
+test('arrow recovery pins fresh revision, policy, original evidence and six-page scope',t=>{
+  const {b,p}=fixture(t,{productionPages:arrowIds});const legacy=legacyArrows(b);
+  const text=legacy.p.structuredContent.text.split('<content>\n')[1].split('\n</content>')[0];
+  rejects('RECONCILE_CHANGED',()=>b.handle({...legacy.input,page:page(A,text,{title:'Test'},'later')}));
+  rejects('PERSISTENCE',()=>b.handle({...legacy.input,actualSnapshotHash:'wrong'}));
+  p.productionPages=[A];rejects('PRODUCTION_HOLD',()=>b.handle(legacy.input));p.productionPages=arrowIds;
+  const edits=b.state.batches.observation.edits;edits.pop();
+  b.state.batches.observation.planHash=hash(JSON.stringify(edits));
+  rejects('RECONCILE_IDENTITY',()=>b.handle({...legacy.input,planHash:b.state.batches.observation.planHash}));
+});
+test('a later unwritten transport recovery rechecks the audited arrow receipt without rewriting its page',t=>{
+  const f=fixture(t,{productionPages:arrowIds});const legacy=legacyArrows(f.b);f.b.handle(legacy.input);
+  const pending=prepare(f.b,page(B));haltAuthorization(f.b,pending);f.restart();
+  assert.equal(f.b.handle(repairInput(f.b,'reconcile_receipts')).priorVerified,1);
+  assert.equal(f.b.handle(repairInput(f.b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)})).status,'PREPARED');
+  const verified=JSON.parse(fs.readFileSync(legacy.receipt.snapshot+'.verified.json'));
+  verified.reconciliation.actualHash='tampered';fs.writeFileSync(legacy.receipt.snapshot+'.verified.json',JSON.stringify(verified));
+  haltAuthorization(f.b,pending);
+  rejects('PERSISTENCE',()=>f.b.handle(repairInput(f.b,'reconcile_receipts')));
 });

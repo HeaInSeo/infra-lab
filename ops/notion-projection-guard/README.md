@@ -145,6 +145,25 @@ come from a reviewed original incident, not from a replacement batch or a manual
 journal reset. A subsequent normal update still uses fresh preflight, the single
 canonical state, protected-content verification and durable ACK.
 
+### Explicit recovery of central arrow escaping
+
+A later six-page central batch halted on its first page: the connector returned
+the two plain ` -> ` sequences as ` -\> `. New writes reject plain ASCII arrows
+outside inline code/links (`MARKDOWN_ESCAPE_RISK`); use `→` or inline code.
+The ordinary verifier still requires exact equality.
+
+The separately invoked broker action `reconcile_escaped_arrows` requires that
+same six-page, index-zero HALTED plan and its original ticket, full snapshots,
+hashes and fresh revision. Only those two arrow escapes inside the intended
+central literal are admitted; properties and every protected byte must match.
+All remaining edits must pass the current policy and rendering preflight.
+The action writes no Notion content. It saves the reviewed first-page receipt
+and advances the original batch only to READY at index one. Run the unchanged
+original plan to apply its remaining five pages through normal verification.
+The audited receipt is also revalidated if a later unwritten transport recovery
+occurs, without rewriting the first page. No new batch/state, journal reset,
+general Markdown normalization, skipped page or policy expansion is involved.
+
 Run `node --test test_guard.cjs`. The suite exercises the 4,000-character range,
 tail loss, native child references, worker evidence, ambiguous scope, concurrent
 revision/properties, snapshot tampering/storage failure, lost ACK/restart,
