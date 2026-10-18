@@ -198,3 +198,14 @@ Keep an exact private backup and hash manifest. Stop on a busy lock or source
 change. Re-run file hashes and test rejection paths before any live write, then
 verify the two actual complete page readbacks. Test fixtures are not worker
 receipts or product acceptance, and full fetched equality is not atomic Notion CAS.
+
+`reconcile_w02_prewrite.cjs` is a separately invoked, single-incident recovery for
+the W02 projection batch halted before its first prepare when Notion stored a
+queue-cleanup timestamp at minute precision. It pins that batch, plan, error,
+zero-progress/no-ticket state, absence of prepared snapshots, the completed
+two-source batch and its full durable receipts, and exact fresh native values.
+It acknowledges no write, advances no page and emits no Notion request. A private
+audit restores only READY on the same plan, after which ordinary fresh prepare,
+authorization and full readback still apply. `--check-only` changes no journal.
+Any other incident, body/worker-property drift or prepared write remains blocked;
+the normal broker verifier admits no timestamp or content normalization.
