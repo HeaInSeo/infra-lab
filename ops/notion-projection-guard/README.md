@@ -145,4 +145,3 @@ Run `node --test test_guard.cjs`. The suite exercises the 4,000-character range,
 tail loss, native child references, worker evidence, ambiguous scope, concurrent
 revision/properties, snapshot tampering/storage failure, lost ACK/restart,
 async failure and the actual connector orchestration's stop-before-next-write.
-

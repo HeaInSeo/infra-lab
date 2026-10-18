@@ -371,4 +371,3 @@ test('runner explicit autolink reconciliation performs one fresh fetch and zero 
   const result=await f.runner.reconcileAutolink(i.batchId,i.planHash,i.snapshotHash,i.actualHash,i.actualSnapshotHash);
   assert.equal(result.status,'COMPLETED');assert.equal(f.fetches,1);assert.equal(f.writes,0);assert.equal(f.closed,true);
 });
-

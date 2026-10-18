@@ -452,4 +452,3 @@ if (require.main === module) {
   for (const signal of ['SIGTERM','SIGINT','SIGHUP']) process.on(signal, () => { close(); process.exit(0); });
 }
 module.exports = { Broker, GuardError, hash, pageData, plan, validateEdit, atomic };
-
