@@ -473,3 +473,21 @@ test('a later unwritten transport recovery rechecks the audited arrow receipt wi
   haltAuthorization(f.b,pending);
   rejects('PERSISTENCE',()=>f.b.handle(repairInput(f.b,'reconcile_receipts')));
 });
+test('resume identity rejection preserves an already reconciled READY batch for ordinary run',async t=>{
+  const f=runnerFixture(t,undefined,{productionPages:arrowIds});const legacy=legacyArrows(f.f.b);
+  f.pages.set(A,legacy.p);for(const p of arrowIds.slice(1))f.pages.set(p,page(p));
+  f.f.b.handle(legacy.input);
+  await assert.rejects(f.runner.resume('observation',legacy.input.planHash),/RECONCILE_IDENTITY/);
+  assert.equal(f.f.b.state.batches.observation.status,'READY');
+  assert.equal(f.f.b.state.batches.observation.next,1);assert.equal(f.writes,0);
+  assert.equal((await f.newRunner().run('observation',legacy.edits)).status,'COMPLETED');
+  assert.equal(f.writes,5);assert.deepEqual(f.pages.get(A),legacy.p);
+});
+test('inline code masks literal backslashes and shorter backtick runs before rendering preflight',t=>{
+  for(const s of ['path=`C:\\tmp\\package-cli.sh -> next`',
+    'path=`C:\\tmp\\` then → next', 'path=``C:\\tmp `inner` -> next``']) {
+    const {b}=fixture(t);assert.equal(begin(b,[edit(A,{newStr:s})]).status,'READY');
+  }
+  const {b}=fixture(t);
+  rejects('MARKDOWN_ESCAPE_RISK',()=>begin(b,[edit(A,{newStr:'path=\\`C:\\tmp -> next\\`'})]));
+});

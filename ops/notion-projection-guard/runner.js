@@ -125,11 +125,13 @@
   }
   async function resume(batchId, expectedPlanHash) {
     const receipts = [];
+    let enteredRecovery = false;
     try {
       const state = await broker({ action:'status' });
       const batch = state.batches?.[batchId];
       if (state.active !== batchId || !batch || batch.planHash !== expectedPlanHash ||
           batch.status !== 'HALTED' || !batch.receipt) throw new Error('RECONCILE_IDENTITY');
+      enteredRecovery = true;
       const identity = { batchId, planHash:expectedPlanHash, expectedError:batch.error };
       // Earlier pages already passed full preservation checks. Validate their
       // durable receipts, then leave any subsequent worker records untouched.
@@ -150,7 +152,9 @@
       }
       return { status:'COMPLETED', resumed:true, receipts };
     } catch (error) {
-      try { await broker({ action:'halt', batchId, reason:error.message }); } catch { /* Preserve HALTED. */ }
+      if (enteredRecovery) {
+        try { await broker({ action:'halt', batchId, reason:error.message }); } catch { /* Preserve HALTED. */ }
+      }
       throw error;
     } finally { await close(); }
   }

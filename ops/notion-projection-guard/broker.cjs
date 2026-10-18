@@ -89,7 +89,7 @@ function validateEdit(edit, policy) {
 function plainMarkup(text) {
   // Require explicit code/link markup for hostname-shaped filenames. Notion
   // can turn these into links, invalidating the exact post-write comparison.
-  return text.replace(/(?<!\\)(`{1,2})(?!`)([^`\\]+?)\1(?!`)/g, match => ' '.repeat(match.length))
+  return text.replace(/(?<![\\`])(`{1,2})(?!`)([\s\S]*?)(?<!`)\1(?!`)/g, match => ' '.repeat(match.length))
     .replace(/(?<!\\)\[[^\]\\\r\n]+\]\(https?:\/\/[^\s()\\]+\)/g, match => ' '.repeat(match.length));
 }
 function bareAutolinks(text) {
