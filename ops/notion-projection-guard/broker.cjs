@@ -17,6 +17,17 @@ function id(value) {
     fail('PAGE_ID', 'A native page UUID is required');
   return value.replaceAll('-', '').toLowerCase();
 }
+// Reviewed legacy central anchors only. A policy cannot authorize arbitrary
+// CURRENT/worker headings or grant these pages the general prefix permission.
+const legacyCentralSections = Object.freeze({
+  '3f586e6dd1d181ebb43dd7de62aa2ca4': '## CURRENT · 마지막 중앙 관측 · QSYNC-20261010T145034Z-v6 · W02.A KEEP_GATED ON W01.3',
+  '3f586e6dd1d181cd9f5bdcdab6290de7': '## CURRENT · 마지막 중앙 관측 · QSYNC-20261010T145034Z-v6 · W02.A REVIEW KEEP_GATED'
+});
+function exactCentralSection(edit, policy) {
+  const pageId = id(edit.pageId);
+  return legacyCentralSections[pageId] === edit.heading &&
+    (policy.centralSections ?? []).some(s => s.pageId === pageId && s.heading === edit.heading);
+}
 function unwrap(value) {
   for (let n = 0; n < 5 && value?.structuredContent; n++) {
     if (value.isError) fail('FETCH_ERROR', 'Connector returned an error');
@@ -74,8 +85,11 @@ function headings(body) {
 function validateEdit(edit, policy) {
   if (!edit || Object.keys(edit).some(k => !['pageId', 'heading', 'oldStr', 'newStr'].includes(k)))
     fail('EDIT_SCHEMA', 'Only pageId, heading, oldStr and newStr are accepted');
-  id(edit.pageId);
-  if (!policy.headingPrefixes.some(prefix => edit.heading?.startsWith(prefix)))
+  const pageId = id(edit.pageId);
+  const ownsHeading = Object.hasOwn(legacyCentralSections, pageId)
+    ? exactCentralSection(edit, policy)
+    : policy.headingPrefixes.some(prefix => edit.heading?.startsWith(prefix));
+  if (!ownsHeading)
     fail('OWNERSHIP', 'Only explicit central-owned observation headings are editable');
   for (const field of ['oldStr', 'newStr']) {
     const value = edit[field];
@@ -85,6 +99,13 @@ function validateEdit(edit, policy) {
       fail('PROTECTED_SYNTAX', 'Headings, native blocks and own event records are protected');
   }
   if (edit.oldStr === edit.newStr) fail('NO_CHANGE', 'No-op is not an update');
+}
+function validateScope(edit, policy) {
+  validateEdit(edit, policy);
+  const pageId = id(edit.pageId);
+  if (!policy.canaryPages.includes(pageId) && (!policy.productionEnabled ||
+      (!policy.productionPages.includes(pageId) && !exactCentralSection(edit, policy))))
+    fail('PRODUCTION_HOLD', 'Production remains blocked until incident restoration');
 }
 function plainMarkup(text) {
   // Require explicit code/link markup for hostname-shaped filenames. Notion
@@ -163,6 +184,19 @@ class Broker {
     for (const page of [...policy.productionPages, ...policy.canaryPages]) {
       if (id(page) !== page) fail('POLICY', 'Policy requires canonical page UUIDs');
     }
+    if (policy.canaryPages.some(page => Object.hasOwn(legacyCentralSections, page)))
+      fail('POLICY', 'Legacy central task pages are never canaries');
+    const sections = Object.hasOwn(policy, 'centralSections') ? policy.centralSections : [];
+    if (!Array.isArray(sections) || sections.length > 2)
+      fail('POLICY', 'Only the two reviewed legacy central anchors are supported');
+    const seen = new Set();
+    for (const section of sections) {
+      if (!section || Object.keys(section).length !== 2 ||
+          typeof section.pageId !== 'string' || !Object.hasOwn(legacyCentralSections, section.pageId) ||
+          section.heading !== legacyCentralSections[section.pageId] || seen.has(section.pageId))
+        fail('POLICY', 'Exact reviewed page/heading pairs required');
+      seen.add(section.pageId);
+    }
     this.root = path.resolve(root); this.policy = policy; this.file = path.join(this.root, 'journal.json');
     fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });
     const st = fs.lstatSync(this.root);
@@ -202,13 +236,10 @@ class Broker {
     const edit = b.edits[0];
     const seen = new Set();
     for (const [index, planned] of b.edits.entries()) {
-      validateEdit(planned, this.policy);
+      validateScope(planned, this.policy);
       const pageId = id(planned.pageId);
       if (seen.has(pageId)) fail('RECONCILE_IDENTITY', 'Duplicate recovery page');
       seen.add(pageId);
-      if (!this.policy.canaryPages.includes(pageId) &&
-          (!this.policy.productionEnabled || !this.policy.productionPages.includes(pageId)))
-        fail('PRODUCTION_HOLD', 'Recovery cannot enlarge the writable page scope');
       if (index > 0) stableNewText(planned);
     }
     const file = b.receipt.snapshot, snapshot = read(file), actual = read(file + '.actual.json');
@@ -293,11 +324,7 @@ class Broker {
         !b.error.includes(JSON.stringify(b.receipt.ticket)))
       fail('RECONCILE_SCOPE', 'Only an unwritten DC authorize prompt failure can be reconciled');
     for (const edit of b.edits) {
-      validateEdit(edit, this.policy);
-      const pageId = id(edit.pageId);
-      if (!this.policy.canaryPages.includes(pageId) &&
-          (!this.policy.productionEnabled || !this.policy.productionPages.includes(pageId)))
-        fail('PRODUCTION_HOLD', 'Recovery cannot enlarge the writable page scope');
+      validateScope(edit, this.policy);
     }
     const checkSnapshot = (snapshot, index) => {
       if (snapshot.batchId !== batchId || snapshot.index !== index ||
@@ -397,13 +424,10 @@ class Broker {
       if (!Array.isArray(edits) || !edits.length || edits.length > 30) fail('EDIT_SCHEMA', '1–30 page edits required');
       const seen = new Set();
       for (const edit of edits) {
-        validateEdit(edit, this.policy);
+        validateScope(edit, this.policy);
         const page = id(edit.pageId);
         if (seen.has(page)) fail('DUPLICATE_PAGE', 'One minimal literal per page per batch');
         seen.add(page);
-        const isCanary = this.policy.canaryPages.includes(page);
-        if (!isCanary && (!this.policy.productionEnabled || !this.policy.productionPages.includes(page)))
-          fail('PRODUCTION_HOLD', 'Production remains blocked until incident restoration');
       }
       const key = hash(JSON.stringify(edits));
       const previous = Object.hasOwn(this.state.batches,batchId) ? this.state.batches[batchId] : null;
@@ -427,6 +451,7 @@ class Broker {
     }
     if (action === 'prepare') {
       if (b.status !== 'READY') fail('PAGE_BARRIER', 'Prior page has not verified');
+      validateScope(edit, this.policy);
       stableNewText(edit);
       const page = pageData(input.page, edit.pageId), p = plan(page, edit);
       const ticket = crypto.randomUUID();
@@ -447,6 +472,7 @@ class Broker {
     if (hash(JSON.stringify(snapshot)) !== b.receipt.snapshotHash) fail('PERSISTENCE', 'Immutable snapshot changed');
     if (action === 'authorize') {
       if (b.status !== 'PREPARED') fail('PAGE_BARRIER', 'Write has already been authorized; never retry it');
+      validateScope(edit, this.policy);
       stableNewText(edit);
       const page = pageData(input.page, edit.pageId);
       if (page.body !== snapshot.page.body || page.properties !== snapshot.page.properties ||

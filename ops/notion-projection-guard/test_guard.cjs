@@ -28,6 +28,101 @@ function authorize(b, receipt, p=page()) { return b.handle({action:'authorize',b
 function verify(b, receipt, p=page(A,body(newStr))) { return b.handle({action:'verify',batchId:'observation',ticket:receipt.ticket,page:p}); }
 function rejects(code, fn) { assert.throws(fn, error=>error.code===code); }
 
+const w02Sections = [
+  {pageId:'3f586e6dd1d181ebb43dd7de62aa2ca4',heading:'## CURRENT · 마지막 중앙 관측 · QSYNC-20261010T145034Z-v6 · W02.A KEEP_GATED ON W01.3'},
+  {pageId:'3f586e6dd1d181cd9f5bdcdab6290de7',heading:'## CURRENT · 마지막 중앙 관측 · QSYNC-20261010T145034Z-v6 · W02.A REVIEW KEEP_GATED'}
+];
+const ownPreflight = '## OPERATOR PREFLIGHT NOTE (no CLAIM, no lease)\nworker_note=DESIGN_GAP; original evidence preserved\n';
+function w02Body(section, status=oldStr) { return ownPreflight+section.heading+'\n'+status+'\n## 착수·범위·증거\n'+body('historical_status=KEPT'); }
+function w02Edit(section, changes={}) { return {...section,oldStr,newStr,...changes}; }
+for (const section of w02Sections) {
+  test('exact W02 central section preserves earlier preflight, later proof and all properties: '+section.pageId,t=>{
+    const {b}=fixture(t,{centralSections:w02Sections});
+    const props={title:'W02', '세션 ID':'genuine-worker', '세션 단계':'미시작', '이벤트 ID':'original'};
+    const input=page(section.pageId,w02Body(section),props);
+    begin(b,[w02Edit(section)]);const r=prepare(b,input);
+    const request=authorize(b,r,input).request;
+    assert.deepEqual(request,{page_id:section.pageId,command:'update_content',allow_async:false,allow_deleting_content:false,
+      content_updates:[{old_str:oldStr,new_str:newStr,replace_all_matches:false}]});
+    assert.equal(verify(b,r,page(section.pageId,w02Body(section,newStr),props)).protectedContent,'UNCHANGED');
+    assert.equal(begin(b,[w02Edit(section)]).status,'COMPLETED');
+  });
+  for (const change of [
+    {heading:section.heading+' extra'}, {heading:w02Sections.find(s=>s!==section).heading},
+    {heading:'## CURRENT'}, {heading}, {heading:'## OPERATOR PREFLIGHT NOTE (no CLAIM, no lease)'},
+    {pageId:A}, {pageId:'cccccccccccccccccccccccccccccccc'}
+  ]) test('W02 permission does not expand to '+JSON.stringify(change),t=>{
+    const {b}=fixture(t,{centralSections:w02Sections,productionPages:[A,B,...w02Sections.map(s=>s.pageId)]});
+    rejects('OWNERSHIP',()=>begin(b,[w02Edit(section,change)]));assert.equal(b.state.active,null);
+  });
+  test('W02 central scope requires opt-in and an enabled production policy: '+section.pageId,t=>{
+    const f=fixture(t);rejects('OWNERSHIP',()=>begin(f.b,[w02Edit(section)]));
+    f.p.centralSections=w02Sections;f.p.productionEnabled=false;
+    rejects('PRODUCTION_HOLD',()=>begin(f.b,[w02Edit(section)]));assert.equal(f.b.state.active,null);
+  });
+  test('W02 worker edit and property injection are rejected: '+section.pageId,t=>{
+    const {b}=fixture(t,{centralSections:w02Sections});
+    rejects('EDIT_SCHEMA',()=>begin(b,[w02Edit(section,{properties:{'세션 ID':'forged'}})]));
+    begin(b,[w02Edit(section,{oldStr:'worker_note=DESIGN_GAP',newStr:'worker_note=READY'})]);
+    rejects('OUTSIDE_SECTION',()=>prepare(b,page(section.pageId,w02Body(section))));
+  });
+  for (const marker of ['event_id=worker','```json\n{"QUEUE_EVENT_V1":true}\n```','### own evidence','<page url="https://notion.so/'+A+'">Child</page>'])
+    test('W02 central section containing protected structure rejects: '+section.pageId+' '+marker,t=>{
+      const {b}=fixture(t,{centralSections:w02Sections});begin(b,[w02Edit(section)]);
+      rejects('PROTECTED_SECTION',()=>prepare(b,page(section.pageId,w02Body(section).replace(oldStr,oldStr+'\n'+marker))));
+    });
+  test('W02 scope is rechecked after policy revocation at prepare and authorize: '+section.pageId,t=>{
+    const f=fixture(t,{centralSections:w02Sections});begin(f.b,[w02Edit(section)]);
+    f.p.centralSections=[];f.restart();
+    rejects('OWNERSHIP',()=>prepare(f.b,page(section.pageId,w02Body(section))));
+    f.p.centralSections=w02Sections;const r=prepare(f.b,page(section.pageId,w02Body(section)));
+    f.p.centralSections=[];f.restart();
+    rejects('OWNERSHIP',()=>authorize(f.b,r,page(section.pageId,w02Body(section))));
+    assert.equal(f.b.state.batches.observation.status,'PREPARED');
+    f.p.centralSections=w02Sections;f.p.productionEnabled=false;f.restart();
+    rejects('PRODUCTION_HOLD',()=>authorize(f.b,r,page(section.pageId,w02Body(section))));
+  });
+  test('W02 concurrent preflight, properties or revision stops authorization: '+section.pageId,t=>{
+    const {b}=fixture(t,{centralSections:w02Sections});begin(b,[w02Edit(section)]);
+    const input=page(section.pageId,w02Body(section));const r=prepare(b,input);
+    for (const changed of [page(section.pageId,w02Body(section)+'\nnew worker note'),
+      page(section.pageId,w02Body(section),{title:'Test','세션 ID':'new worker'}),
+      page(section.pageId,w02Body(section),{title:'Test'},'2026-10-19T00:00:00Z')])
+      rejects('CONCURRENT_CHANGE',()=>authorize(b,r,changed));
+    assert.equal(b.state.batches.observation.status,'PREPARED');
+  });
+}
+test('W02 prefix/suffix loss or worker property changes halt before the second W02 page',t=>{
+  for (const damage of ['prefix','suffix','properties']) {
+    const {b}=fixture(t,{centralSections:w02Sections});begin(b,w02Sections.map(s=>w02Edit(s)));
+    const s=w02Sections[0],input=page(s.pageId,w02Body(s)),r=prepare(b,input);authorize(b,r,input);
+    const content=w02Body(s,newStr);
+    const changed=page(s.pageId,damage==='prefix'?content.replace(ownPreflight,''):damage==='suffix'?content.replace(history,''):content,
+      damage==='properties'?{title:'Test','세션 ID':'changed'}:{title:'Test'});
+    rejects('READBACK_MISMATCH',()=>verify(b,r,changed));
+    rejects('HALTED',()=>prepare(b,page(w02Sections[1].pageId,w02Body(w02Sections[1]))));
+    rejects('UNRESOLVED_BATCH',()=>b.handle({action:'begin',batchId:'other',edits:[edit()]}));
+  }
+});
+test('W02 runner uses only two exact content requests and preserves both complete pages',async t=>{
+  const f=runnerFixture(t,null,{centralSections:w02Sections});
+  for(const s of w02Sections) f.pages.set(s.pageId,page(s.pageId,w02Body(s)));
+  const result=await f.runner.run('observation',w02Sections.map(s=>w02Edit(s)));
+  assert.equal(result.status,'COMPLETED');assert.equal(f.writes,2);assert.equal(f.fetches,6);
+  for(const s of w02Sections) assert.equal(pageData(f.pages.get(s.pageId),s.pageId).body,w02Body(s,newStr));
+});
+for (const sections of [null,{},[w02Sections[0],w02Sections[0]],
+  [{...w02Sections[0],pageId:A}],[{...w02Sections[0],heading:'## CURRENT'}],
+  [{...w02Sections[0],extra:true}],[{...w02Sections[0],pageId:w02Sections[0].pageId.toUpperCase()}],
+  [...w02Sections,w02Sections[0]]]) test('invalid W02 policy rejects before creating state: '+JSON.stringify(sections),t=>{
+    const f=fixture(t);const root=path.join(f.root,'invalid');
+    rejects('POLICY',()=>new Broker(root,{...f.p,centralSections:sections}));assert.equal(fs.existsSync(root),false);
+  });
+test('W02 task pages cannot be relabeled as canaries to bypass the production hold',t=>{
+  const f=fixture(t);rejects('POLICY',()=>new Broker(path.join(f.root,'invalid'),{...f.p,centralSections:w02Sections,
+    productionEnabled:false,canaryPages:[w02Sections[0].pageId]}));
+});
+
 test('two real-shaped pages preserve all 5000+ characters, proof and child refs',t=>{
   const {b}=fixture(t);begin(b,[edit(),edit(B)]);
   const first=prepare(b);assert.equal(fs.existsSync(first.snapshot),true);

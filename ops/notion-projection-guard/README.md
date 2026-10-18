@@ -172,3 +172,29 @@ Run `node --test test_guard.cjs`. The suite exercises the 4,000-character range,
 tail loss, native child references, worker evidence, ambiguous scope, concurrent
 revision/properties, snapshot tampering/storage failure, lost ACK/restart,
 async failure and the actual connector orchestration's stop-before-next-write.
+
+### Exact Sori W02 central anchors
+
+The optional `centralSections` policy enables only the two legacy W02 writer and
+paired-review central headings listed in `policy.json`. The broker pins both
+page/heading pairs in code and rejects unknown, duplicate, broadened or malformed
+entries before opening state. These task pages cannot be canaries. Production
+must be enabled; the checked-in default remains disabled.
+
+These two pages receive no general heading-prefix permission, even if their IDs
+are added to `productionPages`. Their existing headings stay unchanged as stable
+anchors. No worker preflight, event, history, property, append or whole-page
+operation is supported. The same unique single-line limit, real following
+boundary, durable snapshot, fresh authorization and complete readback apply.
+Scope is checked again at prepare and authorize, including a prepared ticket
+reopened after the opt-in is removed or production is disabled. A rejected ticket
+stays blocked; no journal reset or replacement batch bypass is introduced.
+
+For activation, keep the existing canonical state and all runtime policy values;
+add only the two exact `centralSections` entries. Verify the candidate with a
+separate non-production test state, inspect that the canonical journal is idle,
+and acquire its existing broker lock before replacing approved runtime files.
+Keep an exact private backup and hash manifest. Stop on a busy lock or source
+change. Re-run file hashes and test rejection paths before any live write, then
+verify the two actual complete page readbacks. Test fixtures are not worker
+receipts or product acceptance, and full fetched equality is not atomic Notion CAS.

@@ -18,6 +18,16 @@
     "3f786e6dd1d18157bd46dc0c805bf3cb",
     "3f786e6dd1d181008ed3dc1f14717d06"
   ],
+  "centralSections": [
+    {
+      "pageId": "3f586e6dd1d181ebb43dd7de62aa2ca4",
+      "heading": "## CURRENT · 마지막 중앙 관측 · QSYNC-20261010T145034Z-v6 · W02.A KEEP_GATED ON W01.3"
+    },
+    {
+      "pageId": "3f586e6dd1d181cd9f5bdcdab6290de7",
+      "heading": "## CURRENT · 마지막 중앙 관측 · QSYNC-20261010T145034Z-v6 · W02.A REVIEW KEEP_GATED"
+    }
+  ],
   "headingPrefixes": [
     "## CURRENT CENTRAL OBSERVATION",
     "## CURRENT CENTRAL ACTION",
