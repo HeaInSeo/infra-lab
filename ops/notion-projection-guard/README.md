@@ -165,6 +165,7 @@ occurs, without rewriting the first page. No new batch/state, journal reset,
 general Markdown normalization, skipped page or policy expansion is involved.
 Calling `resume` with an unsupported identity leaves the current batch unchanged;
 in particular it cannot re-halt the READY batch after arrow reconciliation.
+Likewise, a rejected `run` admission cannot halt somebody else's existing plan.
 Inline code treats backslashes as literal content, including Windows paths.
 
 Run `node --test test_guard.cjs`. The suite exercises the 4,000-character range,

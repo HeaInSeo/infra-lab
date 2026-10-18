@@ -402,7 +402,7 @@ test('legacy READY replay cannot bypass autolink preflight or issue a Notion mut
   f.f.b.state.batches.observation={planHash:hash(JSON.stringify(edits)),edits,next:0,status:'READY',receipt:null};
   f.f.b.state.active='observation';f.f.b.save();
   await assert.rejects(f.runner.run('observation',edits),/AUTOLINK_RISK/);
-  assert.equal(f.fetches,0);assert.equal(f.writes,0);assert.equal(f.f.b.state.batches.observation.status,'HALTED');
+  assert.equal(f.fetches,0);assert.equal(f.writes,0);assert.equal(f.f.b.state.batches.observation.status,'READY');
 });
 test('direct prepare and legacy PREPARED authorization both reject unsafe text before write authorization',t=>{
   const f=fixture(t);const legacy=legacyAutolink(f.b);const b=f.b.state.batches.observation;
@@ -490,4 +490,13 @@ test('inline code masks literal backslashes and shorter backtick runs before ren
   }
   const {b}=fixture(t);
   rejects('MARKDOWN_ESCAPE_RISK',()=>begin(b,[edit(A,{newStr:'path=\\`C:\\tmp -> next\\`'})]));
+});
+test('run identity rejection also preserves a reconciled READY plan for the correct caller',async t=>{
+  const f=runnerFixture(t,undefined,{productionPages:arrowIds});const legacy=legacyArrows(f.f.b);
+  f.pages.set(A,legacy.p);for(const p of arrowIds.slice(1))f.pages.set(p,page(p));
+  f.f.b.handle(legacy.input);
+  const wrong=structuredClone(legacy.edits);wrong[1].newStr='central_status=DIFFERENT';
+  await assert.rejects(f.runner.run('observation',wrong),/BATCH_REUSE/);
+  assert.equal(f.f.b.state.batches.observation.status,'READY');assert.equal(f.writes,0);
+  assert.equal((await f.newRunner().run('observation',legacy.edits)).status,'COMPLETED');assert.equal(f.writes,5);
 });

@@ -100,10 +100,12 @@
   }
   async function run(batchId, edits) {
     const receipts = [];
+    let enteredRun = false;
     try {
       const begin = await broker({ action: 'begin', batchId, edits });
       if (begin.status === 'COMPLETED') return { status: 'COMPLETED', replayed: false, alreadyConsumed: true, receipts };
       if (begin.status !== 'READY') throw new Error('UNRESOLVED_BATCH: '+begin.status);
+      enteredRun = true;
       for (let index=begin.next; index<edits.length; index++) {
         const edit=edits[index];
         const prepared = await broker({ action:'prepare', batchId, page:await tools.mcp__codex_apps__notion_fetch({ id:edit.pageId }) });
@@ -119,7 +121,9 @@
     } catch (error) {
       // Errors before begin (e.g. PRODUCTION_HOLD) need no journal mutation.
       // Errors after begin keep the global barrier, including ACK loss/crashes.
-      try { await broker({ action:'halt', batchId, reason:error.message }); } catch { /* Existing state remains closed. */ }
+      if (enteredRun) {
+        try { await broker({ action:'halt', batchId, reason:error.message }); } catch { /* Existing state remains closed. */ }
+      }
       throw error;
     } finally { await close(); }
   }
