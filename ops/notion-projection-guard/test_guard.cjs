@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
-const { Broker, hash } = require('./broker.cjs');
+const { Broker, hash, pageData, plan, atomic } = require('./broker.cjs');
 const A='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', B='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const heading='## CURRENT CENTRAL OBSERVATION · test';
 const oldStr='central_status=WAIT', newStr='central_status=VERIFIED';
@@ -126,12 +126,14 @@ test('snapshot persistence failure yields no write authorization',t=>{
 });
 
 const createRunner=vm.runInNewContext(fs.readFileSync(path.join(__dirname,'runner.js'),'utf8'),{setTimeout:(fn)=>setTimeout(fn,0)});
-function runnerFixture(t, fault) {
-  const f=fixture(t);let writes=0,fetches=0,closed=false,retained=null;const pages=new Map([[A,page()],[B,page(B)]]);
+function runnerFixture(t, fault, policy={}) {
+  const f=fixture(t,policy);let writes=0,fetches=0,closed=false,retained=null;const pages=new Map([[A,page()],[B,page(B)]]);
   const tools={
     async mcp__codex_apps__remote_desktop_commander_start_process(){return {content:[{type:'text',text:'Process started with PID 123\nNPG/1 {"ready":true}'}]};},
-    async mcp__codex_apps__remote_desktop_commander_interact_with_process({input}){
+    async mcp__codex_apps__remote_desktop_commander_interact_with_process({input,wait_for_prompt}){
       const r=JSON.parse(input);let value;
+      if(fault==='prompt-regex' && r.action==='authorize' && wait_for_prompt!==false)
+        return {isError:true,content:[{type:'text',text:'Error interacting with process: Invalid regular expression: /^'+input.slice(0,500)}]};
       try{value={requestId:r.requestId,ok:true,result:f.b.handle(r)};}catch(e){value={requestId:r.requestId,ok:false,code:e.code,error:e.message};}
       if(r.action==='close')closed=true;
       if(fault==='cursor' && r.action==='prepare') {retained=value;return {content:[{type:'text',text:'Input sent; read output'}]};}
@@ -154,7 +156,7 @@ function runnerFixture(t, fault) {
     },
     async mcp__codex_apps__notion_notion_get_async_task(){return {content:[{type:'text',text:'Failed'}],structuredContent:{status:'failed'}};}
   };
-  return {runner:createRunner(tools,{deviceId:'known',command:'known'}),newRunner:()=>createRunner(tools,{deviceId:'known',command:'known'}),get writes(){return writes;},get fetches(){return fetches;},get closed(){return closed;},pages,f};
+  return {runner:createRunner(tools,{deviceId:'known',command:'known'}),newRunner:()=>createRunner(tools,{deviceId:'known',command:'known'}),get writes(){return writes;},get fetches(){return fetches;},get closed(){return closed;},pages,f,tools};
 }
 test('real orchestration uses broker requests, fresh pre/post reads and sequential pages',async t=>{
   const f=runnerFixture(t);const r=await f.runner.run('observation',[edit(),edit(B)]);
@@ -176,4 +178,325 @@ test('DC consumed cursor: retained response by exact ID avoids resend and permit
 test('native Notion content-only JSON ACK is recognized and then fully read back',async t=>{
   const f=runnerFixture(t,'content-only');assert.equal((await f.runner.run('observation',[edit(),edit(B)])).status,'COMPLETED');
   assert.equal(f.writes,2);assert.equal(f.fetches,6);
+});
+
+test('large JSON with regex metacharacters never enters DC prompt matching',async t=>{
+  const f=runnerFixture(t,'prompt-regex');
+  f.pages.set(A,page(A,body()+('[{\\ ⭐ 한국어 '.repeat(150000))));
+  assert.equal((await f.runner.run('observation',[edit()])).status,'COMPLETED');
+  assert.equal(f.writes,1);
+});
+
+function haltAuthorization(b, receipt) {
+  const error='REMOTE_ERROR: Error interacting with process: Invalid regular expression: /^\\{"action":"authorize","batchId":"observation","ticket":'+JSON.stringify(receipt.ticket);
+  b.handle({action:'halt',batchId:'observation',reason:error});
+  return error;
+}
+function repairInput(b, action, extra={}) {
+  const state=b.handle({action:'status'}).batches.observation;
+  return {action,batchId:'observation',planHash:state.planHash,expectedError:state.error,...extra};
+}
+test('explicit recovery keeps the same canonical batch, ticket and page index',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);
+  const first=prepare(b);authorize(b,first);verify(b,first);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  rejects('RECONCILE_ORDER',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)})));
+  b.handle(repairInput(b,'reconcile_verified',{index:0,page:page(A,body(newStr))}));
+  const result=b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)}));
+  assert.equal(result.status,'PREPARED');assert.equal(result.next,1);
+  assert.equal(b.state.batches.observation.receipt.ticket,pending.ticket);
+  assert.equal(b.state.batches.observation.reconciliations[0].priorVerified,1);
+  authorize(b,pending,page(B));assert.equal(verify(b,pending,page(B,body(newStr))).status,'COMPLETED');
+});
+test('completed receipt/protected properties drift blocks recovery without clearing HALTED',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);const a=prepare(b);authorize(b,a);verify(b,a);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  for(const p of [page(A,body(newStr)+'new own RELEASE'),page(A,body(newStr),{title:'changed'})])
+    rejects('RECONCILE_CHANGED',()=>b.handle(repairInput(b,'reconcile_verified',{index:0,page:p})));
+  assert.equal(b.state.batches.observation.status,'HALTED');
+});
+test('changed current preimage, revision or applied output never reauthorizes',t=>{
+  const {b}=fixture(t);begin(b);const pending=prepare(b);haltAuthorization(b,pending);
+  for(const p of [page(A,body()+'new own RELEASE'),page(A,body(),{title:'changed'}),page(A,body(),{title:'Test'},'later'),page(A,body(newStr))])
+    rejects('RECONCILE_CHANGED',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:p})));
+  assert.equal(b.state.batches.observation.status,'HALTED');assert.equal(b.state.batches.observation.next,0);
+});
+test('other failures, changed plan/error/ticket and tampered snapshots remain blocked',t=>{
+  const {b}=fixture(t);begin(b);const pending=prepare(b);haltAuthorization(b,pending);
+  const good=repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page()});
+  for(const changes of [{planHash:'changed'},{expectedError:'changed'},{ticket:'changed'}])
+    rejects('RECONCILE_IDENTITY',()=>b.handle({...good,...changes}));
+  const snapshot=JSON.parse(fs.readFileSync(pending.snapshot));snapshot.page.body+='changed';fs.writeFileSync(pending.snapshot,JSON.stringify(snapshot));
+  rejects('PERSISTENCE',()=>b.handle(good));
+  b.state.batches.observation.error='READBACK_MISMATCH';
+  rejects('RECONCILE_SCOPE',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page()})));
+  assert.equal(b.state.batches.observation.status,'HALTED');
+});
+test('recovery after restart must fresh-check every earlier verified page again',t=>{
+  const f=fixture(t);begin(f.b,[edit(),edit(B)]);const a=prepare(f.b);authorize(f.b,a);verify(f.b,a);
+  const pending=prepare(f.b,page(B));haltAuthorization(f.b,pending);
+  f.b.handle(repairInput(f.b,'reconcile_verified',{index:0,page:page(A,body(newStr))}));f.restart();
+  rejects('RECONCILE_ORDER',()=>f.b.handle(repairInput(f.b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)})));
+});
+test('runner explicitly resumes same halted authorization with one remaining write',async t=>{
+  const f=runnerFixture(t);begin(f.f.b,[edit(),edit(B)]);
+  const a=prepare(f.f.b);authorize(f.f.b,a);verify(f.f.b,a);f.pages.set(A,page(A,body(newStr)));
+  const pending=prepare(f.f.b,page(B));haltAuthorization(f.f.b,pending);
+  const planHash=f.f.b.state.batches.observation.planHash;
+  const result=await f.runner.resume('observation',planHash);
+  assert.equal(result.status,'COMPLETED');assert.equal(f.writes,1);assert.equal(f.closed,true);
+});
+
+test('resume preserves later worker records on a completed page without rewriting it',async t=>{
+  const f=runnerFixture(t);begin(f.f.b,[edit(),edit(B)]);
+  const a=prepare(f.f.b);authorize(f.f.b,a);verify(f.f.b,a);
+  const evolved=page(A,body(newStr)+'new genuine worker RELEASE v32',{title:'Test',session_id:'new-worker'},'2026-10-13T12:18:30Z');
+  f.pages.set(A,evolved);
+  const pending=prepare(f.f.b,page(B));haltAuthorization(f.f.b,pending);
+  const result=await f.runner.resume('observation',f.f.b.state.batches.observation.planHash);
+  assert.equal(result.status,'COMPLETED');assert.equal(f.writes,1);
+  assert.deepEqual(f.pages.get(A),evolved);
+  assert.equal(f.f.b.state.batches.observation.reconciliations[0].mode,'DURABLE_VERIFIED_RECEIPTS');
+});
+test('receipt-only recovery checks immutable evidence without issuing any old-page write',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);
+  const a=prepare(b);authorize(b,a);verify(b,a);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  const checked=b.handle(repairInput(b,'reconcile_receipts'));
+  assert.equal(checked.status,'HALTED');assert.equal(checked.priorVerified,1);
+  assert.equal(b.state.batches.observation.next,1);
+  const ready=b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)}));
+  assert.equal(ready.status,'PREPARED');assert.equal(ready.next,1);
+});
+test('a damaged durable verified receipt cannot unlock the current pending page',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);
+  const a=prepare(b);authorize(b,a);verify(b,a);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  const v=JSON.parse(fs.readFileSync(a.snapshot+'.verified.json'));v.page.body=v.page.body.replace(history,'');
+  fs.writeFileSync(a.snapshot+'.verified.json',JSON.stringify(v));
+  rejects('PERSISTENCE',()=>b.handle(repairInput(b,'reconcile_receipts')));
+  assert.equal(b.state.batches.observation.status,'HALTED');
+  rejects('RECONCILE_ORDER',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)})));
+});
+test('fresh pending-page drift after receipt checks blocks without acknowledging a write',t=>{
+  const {b}=fixture(t);begin(b,[edit(),edit(B)]);
+  const a=prepare(b);authorize(b,a);verify(b,a);
+  const pending=prepare(b,page(B));haltAuthorization(b,pending);
+  b.handle(repairInput(b,'reconcile_receipts'));
+  rejects('RECONCILE_CHANGED',()=>b.handle(repairInput(b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B,body(),{title:'new own record'})})));
+  assert.equal(b.state.batches.observation.status,'HALTED');assert.equal(b.state.batches.observation.next,1);
+});
+
+function legacyAutolink(b, edits=[edit(A,{newStr:'central_status=package-cli.sh awaiting CI'})], actualBody) {
+  // A journal produced before AUTOLINK_RISK existed; upgrade the real persisted
+  // schema rather than allowing the new begin() to authorize this legacy text.
+  b.state.batches.observation={planHash:hash(JSON.stringify(edits)),edits:structuredClone(edits),
+    next:0,status:'READY',receipt:null};b.state.active='observation';b.save();
+  // Seed the exact WRITE_PENDING snapshot made by the old binary. The new
+  // binary must not prepare or authorize this unsafe text again.
+  const preimage=pageData(page(),A),planned=plan(preimage,edits[0]);
+  const snapshot={version:1,batchId:'observation',index:0,ticket:'legacy-ticket',edit:edits[0],page:preimage,
+    expected:planned.expected,beforeHash:planned.beforeHash,afterHash:planned.afterHash,
+    bodyHash:hash(preimage.body),expectedHash:hash(planned.expected),propertiesHash:hash(preimage.properties)};
+  const file=b.snapshot('observation',0);atomic(file,snapshot);
+  const receipt={ticket:snapshot.ticket,snapshot:file,snapshotHash:hash(JSON.stringify(snapshot))};
+  b.state.batches.observation.status='WRITE_PENDING';b.state.batches.observation.receipt=receipt;b.save();
+  const rendered=edits[0].newStr.replace('package-cli.sh','[package-cli.sh](http://package-cli.sh)');
+  const p=page(A,actualBody??body(rendered),{title:'Test'},'2026-10-12T00:01:00Z');
+  rejects('READBACK_MISMATCH',()=>verify(b,receipt,p));
+  const batch=b.state.batches.observation;
+  const actual=JSON.parse(fs.readFileSync(receipt.snapshot+'.actual.json'));
+  return {p,receipt,input:{action:'reconcile_autolink',batchId:'observation',planHash:batch.planHash,
+    expectedError:'READBACK_MISMATCH',ticket:receipt.ticket,snapshotHash:batch.receipt.snapshotHash,
+    actualHash:actual.actualHash,actualSnapshotHash:hash(JSON.stringify(actual)),page:p}};
+}
+for (const spelling of ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', A.toUpperCase()]) {
+  test('unwritten recovery accepts the original admitted UUID spelling: '+spelling,t=>{
+    const {b}=fixture(t);begin(b,[edit(spelling)]);
+    const pending=prepare(b);haltAuthorization(b,pending);
+    b.handle(repairInput(b,'reconcile_receipts'));
+    assert.equal(b.handle(repairInput(b,'reconcile_unwritten',{
+      ticket:pending.ticket,page:page()})).status,'PREPARED');
+    assert.equal(b.state.batches.observation.edits[0].pageId,spelling);
+    authorize(b,pending);assert.equal(verify(b,pending).status,'COMPLETED');
+  });
+  test('autolink recovery accepts the original admitted UUID spelling: '+spelling,t=>{
+    const {b}=fixture(t);const legacy=legacyAutolink(b,[edit(spelling,{
+      newStr:'central_status=package-cli.sh awaiting CI'})]);
+    const result=b.handle(legacy.input);
+    assert.equal(result.status,'COMPLETED');assert.equal(result.reconciliation.notionWrites,0);
+    assert.equal(b.state.batches.observation.edits[0].pageId,spelling);
+  });
+}
+test('reviewed legacy autolink recovery verifies complete saved and fresh pages without a write',t=>{
+  const f=fixture(t);const legacy=legacyAutolink(f.b);f.restart();
+  const out=f.b.handle(legacy.input);
+  assert.equal(out.status,'COMPLETED');assert.equal(out.reconciliation.notionWrites,0);
+  assert.equal(f.b.state.active,null);assert.equal(f.b.state.batches.observation.next,1);
+  const verified=JSON.parse(fs.readFileSync(legacy.receipt.snapshot+'.verified.json'));
+  assert.equal(verified.page.body,legacy.p.structuredContent.text.split('<content>\n')[1].split('\n</content>')[0]);
+  assert.equal(verified.reconciliation.plannedExpectedHash,
+    JSON.parse(fs.readFileSync(legacy.receipt.snapshot)).expectedHash);
+  rejects('RECONCILE_IDENTITY',()=>f.b.handle(legacy.input));
+});
+test('legacy autolink recovery rejects fresh body, properties and revision drift while preserving HALTED',t=>{
+  const {b}=fixture(t);const legacy=legacyAutolink(b);
+  const current=legacy.p.structuredContent.text.split('<content>\n')[1].split('\n</content>')[0];
+  for(const p of [page(A,current+'new real RELEASE'),page(A,current,{title:'changed'}),
+    page(A,current,{title:'Test'},'2026-10-12T00:02:00Z')])
+    rejects('RECONCILE_CHANGED',()=>b.handle({...legacy.input,page:p}));
+  assert.equal(b.state.batches.observation.status,'HALTED');assert.equal(b.state.batches.observation.next,0);
+  assert.equal(fs.existsSync(legacy.receipt.snapshot+'.verified.json'),false);
+});
+for(const [name,render] of [
+  ['tail loss',s=>s.replace(history,'')],
+  ['different link destination',s=>s.replace('http://package-cli.sh','http://example.com')],
+  ['extra change inside intended literal',s=>s.replace('awaiting CI','approved')],
+  ['worker proof change',s=>s.replace('"session_id":"worker"','"session_id":"forged"')]
+])test('reviewed recovery does not admit '+name,t=>{
+  const {b}=fixture(t);const intended=body('central_status=[package-cli.sh](http://package-cli.sh) awaiting CI');
+  const legacy=legacyAutolink(b,undefined,render(intended));
+  rejects('RECONCILE_SCOPE',()=>b.handle(legacy.input));assert.equal(b.state.active,'observation');
+});
+test('reviewed recovery pins batch plan, ticket, both complete snapshots and original error',t=>{
+  const {b}=fixture(t);const legacy=legacyAutolink(b);
+  for(const changes of [{planHash:'wrong'},{ticket:'wrong'},{snapshotHash:'wrong'},{expectedError:'other'}])
+    rejects('RECONCILE_IDENTITY',()=>b.handle({...legacy.input,...changes}));
+  for(const changes of [{actualHash:'wrong'},{actualSnapshotHash:'wrong'}])
+    rejects('PERSISTENCE',()=>b.handle({...legacy.input,...changes}));
+  const p=JSON.parse(fs.readFileSync(legacy.receipt.snapshot+'.actual.json'));p.at='tampered';
+  fs.writeFileSync(legacy.receipt.snapshot+'.actual.json',JSON.stringify(p));
+  rejects('PERSISTENCE',()=>b.handle(legacy.input));assert.equal(b.state.batches.observation.status,'HALTED');
+});
+test('snapshot tampering, production hold and multi-page legacy plans cannot be acknowledged',t=>{
+  const f=fixture(t);const legacy=legacyAutolink(f.b);f.p.productionEnabled=false;
+  rejects('PRODUCTION_HOLD',()=>f.b.handle(legacy.input));f.p.productionEnabled=true;
+  const snap=JSON.parse(fs.readFileSync(legacy.receipt.snapshot));snap.expected+='changed';
+  fs.writeFileSync(legacy.receipt.snapshot,JSON.stringify(snap));
+  rejects('PERSISTENCE',()=>f.b.handle(legacy.input));
+  const other=fixture(t);const multi=legacyAutolink(other.b,
+    [edit(A,{newStr:'central_status=package-cli.sh awaiting CI'}),edit(B)]);
+  rejects('RECONCILE_IDENTITY',()=>other.b.handle(multi.input));
+});
+test('hostname-shaped new text rejects before the first fetch and before claiming the durable barrier',async t=>{
+  const f=runnerFixture(t);await assert.rejects(f.runner.run('new',[edit(A,{newStr:'tool=package-cli.sh'})]),/AUTOLINK_RISK/);
+  assert.equal(f.fetches,0);assert.equal(f.writes,0);assert.equal(f.f.b.state.active,null);
+});
+test('explicit code or Markdown links are admitted, escaped and unclosed markup is not',t=>{
+  for(const s of ['tool=`package-cli.sh`','tool=``package-cli.sh``','tool=[package-cli.sh](http://package-cli.sh)']) {
+    const {b}=fixture(t);assert.equal(begin(b,[edit(A,{newStr:s})]).status,'READY');
+  }
+  for(const s of ['tool=package-cli.sh','tool=`package-cli.sh','tool=\\`package-cli.sh\\`',
+    'tool=\\[package-cli.sh](http://package-cli.sh)','tool=https://example.com/file']) {
+    const {b}=fixture(t);rejects('AUTOLINK_RISK',()=>begin(b,[edit(A,{newStr:s})]));assert.equal(b.state.active,null);
+  }
+});
+test('runner explicit autolink reconciliation performs one fresh fetch and zero Notion mutations',async t=>{
+  const f=runnerFixture(t);const legacy=legacyAutolink(f.f.b);f.pages.set(A,legacy.p);
+  const i=legacy.input;
+  const result=await f.runner.reconcileAutolink(i.batchId,i.planHash,i.snapshotHash,i.actualHash,i.actualSnapshotHash);
+  assert.equal(result.status,'COMPLETED');assert.equal(f.fetches,1);assert.equal(f.writes,0);assert.equal(f.closed,true);
+});
+test('legacy READY replay cannot bypass autolink preflight or issue a Notion mutation',async t=>{
+  const f=runnerFixture(t);const edits=[edit(A,{newStr:'central_status=package-cli.sh awaiting CI'})];
+  f.f.b.state.batches.observation={planHash:hash(JSON.stringify(edits)),edits,next:0,status:'READY',receipt:null};
+  f.f.b.state.active='observation';f.f.b.save();
+  await assert.rejects(f.runner.run('observation',edits),/AUTOLINK_RISK/);
+  assert.equal(f.fetches,0);assert.equal(f.writes,0);assert.equal(f.f.b.state.batches.observation.status,'READY');
+});
+test('direct prepare and legacy PREPARED authorization both reject unsafe text before write authorization',t=>{
+  const f=fixture(t);const legacy=legacyAutolink(f.b);const b=f.b.state.batches.observation;
+  b.status='READY';b.receipt=null;f.b.save();
+  rejects('AUTOLINK_RISK',()=>prepare(f.b));assert.equal(b.status,'READY');
+  b.status='PREPARED';b.receipt=legacy.receipt;f.b.save();
+  rejects('AUTOLINK_RISK',()=>authorize(f.b,legacy.receipt));assert.equal(b.status,'PREPARED');
+});
+test('completed legacy autolink batch replays as consumed without rejecting or rewriting it',t=>{
+  const {b}=fixture(t);const legacy=legacyAutolink(b);const edits=structuredClone(b.state.batches.observation.edits);
+  b.handle(legacy.input);assert.equal(begin(b,edits).status,'COMPLETED');assert.equal(b.state.active,null);
+});
+test('READY replay validates remaining pages while preserving a previously completed safe page',t=>{
+  const {b}=fixture(t);const edits=[edit(),edit(B,{newStr:'central_status=package-cli.sh awaiting CI'})];
+  b.state.batches.observation={planHash:hash(JSON.stringify(edits)),edits,next:1,status:'READY',receipt:null};
+  b.state.active='observation';b.save();
+  rejects('AUTOLINK_RISK',()=>begin(b,edits));assert.equal(b.state.batches.observation.next,1);
+});
+
+const arrowIds=[A,B,...['c','d','e','f'].map(c=>c.repeat(32))];
+function legacyArrows(b, render=s=>s.replaceAll(' -> ',' -\\> ')) {
+  const edits=arrowIds.map((p,i)=>edit(p,{newStr:i===0?'central_status=writer -> review -> landing':newStr}));
+  const legacy=legacyAutolink(b,edits,render(body(edits[0].newStr)));
+  legacy.input.action='reconcile_escaped_arrows';return {...legacy,edits};
+}
+test('plain ASCII arrows reject before fetch or durable admission; code and Unicode arrows remain stable',async t=>{
+  const f=runnerFixture(t);
+  await assert.rejects(f.runner.run('arrows',[edit(A,{newStr:'central_status=writer -> review'})]),/MARKDOWN_ESCAPE_RISK/);
+  assert.equal(f.fetches,0);assert.equal(f.writes,0);assert.equal(f.f.b.state.active,null);
+  for(const s of ['central_status=writer → review','central_status=`writer -> review`']) {
+    const {b}=fixture(t);assert.equal(begin(b,[edit(A,{newStr:s})]).status,'READY');
+  }
+});
+test('explicit arrow recovery verifies page zero, then the original plan writes only the remaining five pages',async t=>{
+  const f=runnerFixture(t,undefined,{productionPages:arrowIds});const legacy=legacyArrows(f.f.b);
+  f.pages.set(A,legacy.p);for(const p of arrowIds.slice(1))f.pages.set(p,page(p));
+  const recovered=await f.runner.broker(legacy.input);
+  assert.equal(recovered.status,'READY');assert.equal(recovered.next,1);
+  assert.equal(recovered.reconciliation.notionWrites,0);assert.equal(f.writes,0);
+  assert.equal((await f.runner.run('observation',legacy.edits)).status,'COMPLETED');
+  assert.equal(f.writes,5);assert.deepEqual(f.pages.get(A),legacy.p);
+});
+for(const [name,render] of [
+  ['only one arrow escaped',s=>s.replace(' -> ',' -\\> ')],
+  ['protected tail lost',s=>s.replaceAll(' -> ',' -\\> ').replace(history,'')],
+  ['literal wording changed',s=>s.replaceAll(' -> ',' -\\> ').replace('review','approved')]
+])test('arrow recovery rejects '+name,t=>{
+  const {b}=fixture(t,{productionPages:arrowIds});const legacy=legacyArrows(b,render);
+  rejects('RECONCILE_SCOPE',()=>b.handle(legacy.input));assert.equal(b.state.batches.observation.status,'HALTED');
+});
+test('arrow recovery pins fresh revision, policy, original evidence and six-page scope',t=>{
+  const {b,p}=fixture(t,{productionPages:arrowIds});const legacy=legacyArrows(b);
+  const text=legacy.p.structuredContent.text.split('<content>\n')[1].split('\n</content>')[0];
+  rejects('RECONCILE_CHANGED',()=>b.handle({...legacy.input,page:page(A,text,{title:'Test'},'later')}));
+  rejects('PERSISTENCE',()=>b.handle({...legacy.input,actualSnapshotHash:'wrong'}));
+  p.productionPages=[A];rejects('PRODUCTION_HOLD',()=>b.handle(legacy.input));p.productionPages=arrowIds;
+  const edits=b.state.batches.observation.edits;edits.pop();
+  b.state.batches.observation.planHash=hash(JSON.stringify(edits));
+  rejects('RECONCILE_IDENTITY',()=>b.handle({...legacy.input,planHash:b.state.batches.observation.planHash}));
+});
+test('a later unwritten transport recovery rechecks the audited arrow receipt without rewriting its page',t=>{
+  const f=fixture(t,{productionPages:arrowIds});const legacy=legacyArrows(f.b);f.b.handle(legacy.input);
+  const pending=prepare(f.b,page(B));haltAuthorization(f.b,pending);f.restart();
+  assert.equal(f.b.handle(repairInput(f.b,'reconcile_receipts')).priorVerified,1);
+  assert.equal(f.b.handle(repairInput(f.b,'reconcile_unwritten',{ticket:pending.ticket,page:page(B)})).status,'PREPARED');
+  const verified=JSON.parse(fs.readFileSync(legacy.receipt.snapshot+'.verified.json'));
+  verified.reconciliation.actualHash='tampered';fs.writeFileSync(legacy.receipt.snapshot+'.verified.json',JSON.stringify(verified));
+  haltAuthorization(f.b,pending);
+  rejects('PERSISTENCE',()=>f.b.handle(repairInput(f.b,'reconcile_receipts')));
+});
+test('resume identity rejection preserves an already reconciled READY batch for ordinary run',async t=>{
+  const f=runnerFixture(t,undefined,{productionPages:arrowIds});const legacy=legacyArrows(f.f.b);
+  f.pages.set(A,legacy.p);for(const p of arrowIds.slice(1))f.pages.set(p,page(p));
+  f.f.b.handle(legacy.input);
+  await assert.rejects(f.runner.resume('observation',legacy.input.planHash),/RECONCILE_IDENTITY/);
+  assert.equal(f.f.b.state.batches.observation.status,'READY');
+  assert.equal(f.f.b.state.batches.observation.next,1);assert.equal(f.writes,0);
+  assert.equal((await f.newRunner().run('observation',legacy.edits)).status,'COMPLETED');
+  assert.equal(f.writes,5);assert.deepEqual(f.pages.get(A),legacy.p);
+});
+test('inline code masks literal backslashes and shorter backtick runs before rendering preflight',t=>{
+  for(const s of ['path=`C:\\tmp\\package-cli.sh -> next`',
+    'path=`C:\\tmp\\` then → next', 'path=``C:\\tmp `inner` -> next``']) {
+    const {b}=fixture(t);assert.equal(begin(b,[edit(A,{newStr:s})]).status,'READY');
+  }
+  const {b}=fixture(t);
+  rejects('MARKDOWN_ESCAPE_RISK',()=>begin(b,[edit(A,{newStr:'path=\\`C:\\tmp -> next\\`'})]));
+});
+test('run identity rejection also preserves a reconciled READY plan for the correct caller',async t=>{
+  const f=runnerFixture(t,undefined,{productionPages:arrowIds});const legacy=legacyArrows(f.f.b);
+  f.pages.set(A,legacy.p);for(const p of arrowIds.slice(1))f.pages.set(p,page(p));
+  f.f.b.handle(legacy.input);
+  const wrong=structuredClone(legacy.edits);wrong[1].newStr='central_status=DIFFERENT';
+  await assert.rejects(f.runner.run('observation',wrong),/BATCH_REUSE/);
+  assert.equal(f.f.b.state.batches.observation.status,'READY');assert.equal(f.writes,0);
+  assert.equal((await f.newRunner().run('observation',legacy.edits)).status,'COMPLETED');assert.equal(f.writes,5);
 });

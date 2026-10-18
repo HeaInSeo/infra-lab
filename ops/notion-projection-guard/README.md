@@ -91,6 +91,83 @@ snapshot files. A pending write can be reconciled read-only against its saved
 expected body; a mismatched/HALTED batch needs a reviewed bounded recovery.
 No automatic HALTED reset or rollback is implemented.
 
+### Unwritten authorize transport recovery
+
+JSON-line broker calls disable Desktop Commander prompt matching and match only
+the exact protocol request ID. Page JSON is never used as a prompt expression.
+
+An explicitly invoked runner.resume(batchId, expectedPlanHash) can reconcile
+only the observed DC invalid-prompt-regex failure while awaiting authorize.
+It requires the original HALTED batch, unchanged plan/error/ticket and intact
+private snapshots. All earlier full protected-content verification receipts are
+revalidated against their preimages, planned output, native raw reads and hashes.
+Those completed pages receive zero recovery writes, preserving later worker
+records without restoring old snapshots. The unwritten pending page must still
+match its entire fresh body/properties/revision preimage. An already-applied
+output, changed pending page, other transport error, lost Notion ACK, async
+failure or readback mismatch remains blocked.
+
+The broker records a durable reconciliation audit and restores only PREPARED.
+It keeps the page index, ticket, snapshots and edits; it does not acknowledge a
+write or advance the batch. The ordinary fresh authorization, one connector
+mutation, full verification and durable receipt still run for each remaining
+page. A restarted recovery must recheck all earlier durable receipts from zero.
+Use the same state directory and exact canonical batch; no journal editing or
+new batch ID is a recovery path.
+
+### Explicit recovery of the 2026-10-18 autolink mismatch
+
+Notion rendered one bare `package-cli.sh` in a central observation as
+`[package-cli.sh](http://package-cli.sh)`. The ordinary exact verifier correctly
+halted. It continues to reject normalization; no general readback cleanup is
+introduced. New batches reject unmarked hostname-shaped filenames and URLs
+before claiming the journal or fetching Notion. Use inline code or an explicit
+Markdown link so the planned representation is stable.
+Replayed legacy READY batches validate every remaining edit as well. The same
+check runs in prepare and authorize, so a saved PREPARED ticket cannot bypass it.
+
+The separately invoked `runner.reconcileAutolink(batchId, planHash,
+snapshotHash, actualHash, actualSnapshotHash)` reads Notion once and performs
+zero Notion mutations. It admits only a single-page, index-zero original
+`READBACK_MISMATCH` batch. The plan, original ticket, complete private preimage,
+complete unexpected readback and their hashes must match. The only permitted
+difference is the observed `package-cli.sh` autolink within the intended new
+literal; protected prefix, suffix and properties remain byte-for-byte equal.
+The fresh full page and revision must still match the saved unexpected readback.
+Only then does the broker save a verified receipt and reconciliation audit and
+complete that original batch. Other failures, multi-page recovery, changed links,
+concurrent worker records, tampered evidence and production holds stay blocked.
+Both recovery paths use the same canonical UUID scope check as initial admission,
+while retaining the exact original edit spelling and immutable plan hash.
+
+This entry point is never called automatically by `run` or `resume`. Its hashes
+come from a reviewed original incident, not from a replacement batch or a manual
+journal reset. A subsequent normal update still uses fresh preflight, the single
+canonical state, protected-content verification and durable ACK.
+
+### Explicit recovery of central arrow escaping
+
+A later six-page central batch halted on its first page: the connector returned
+the two plain ` -> ` sequences as ` -\> `. New writes reject plain ASCII arrows
+outside inline code/links (`MARKDOWN_ESCAPE_RISK`); use `→` or inline code.
+The ordinary verifier still requires exact equality.
+
+The separately invoked broker action `reconcile_escaped_arrows` requires that
+same six-page, index-zero HALTED plan and its original ticket, full snapshots,
+hashes and fresh revision. Only those two arrow escapes inside the intended
+central literal are admitted; properties and every protected byte must match.
+All remaining edits must pass the current policy and rendering preflight.
+The action writes no Notion content. It saves the reviewed first-page receipt
+and advances the original batch only to READY at index one. Run the unchanged
+original plan to apply its remaining five pages through normal verification.
+The audited receipt is also revalidated if a later unwritten transport recovery
+occurs, without rewriting the first page. No new batch/state, journal reset,
+general Markdown normalization, skipped page or policy expansion is involved.
+Calling `resume` with an unsupported identity leaves the current batch unchanged;
+in particular it cannot re-halt the READY batch after arrow reconciliation.
+Likewise, a rejected `run` admission cannot halt somebody else's existing plan.
+Inline code treats backslashes as literal content, including Windows paths.
+
 Run `node --test test_guard.cjs`. The suite exercises the 4,000-character range,
 tail loss, native child references, worker evidence, ambiguous scope, concurrent
 revision/properties, snapshot tampering/storage failure, lost ACK/restart,

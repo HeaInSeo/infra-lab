@@ -38,7 +38,9 @@
     await start();
     const requestId = 'projection-'+pid+'-'+(++sequence);
     const result = await settled(await tools.mcp__codex_apps__remote_desktop_commander_interact_with_process({
-      deviceId, pid, input: JSON.stringify({ ...request, requestId })+'\n', timeout_ms: 3000, wait_for_prompt: true }));
+      // This is a JSON-line protocol, not a shell prompt. DC prompt detection
+      // can compile the echoed multi-megabyte page as a regular expression.
+      deviceId, pid, input: JSON.stringify({ ...request, requestId })+'\n', timeout_ms: 3000, wait_for_prompt: false }));
     let value = response(result, requestId);
     for (let n=0; !value && n<12; n++) {
       // DC's incremental cursor can already have consumed output during input.
@@ -98,10 +100,12 @@
   }
   async function run(batchId, edits) {
     const receipts = [];
+    let enteredRun = false;
     try {
       const begin = await broker({ action: 'begin', batchId, edits });
       if (begin.status === 'COMPLETED') return { status: 'COMPLETED', replayed: false, alreadyConsumed: true, receipts };
       if (begin.status !== 'READY') throw new Error('UNRESOLVED_BATCH: '+begin.status);
+      enteredRun = true;
       for (let index=begin.next; index<edits.length; index++) {
         const edit=edits[index];
         const prepared = await broker({ action:'prepare', batchId, page:await tools.mcp__codex_apps__notion_fetch({ id:edit.pageId }) });
@@ -117,9 +121,59 @@
     } catch (error) {
       // Errors before begin (e.g. PRODUCTION_HOLD) need no journal mutation.
       // Errors after begin keep the global barrier, including ACK loss/crashes.
-      try { await broker({ action:'halt', batchId, reason:error.message }); } catch { /* Existing state remains closed. */ }
+      if (enteredRun) {
+        try { await broker({ action:'halt', batchId, reason:error.message }); } catch { /* Existing state remains closed. */ }
+      }
       throw error;
     } finally { await close(); }
   }
-  return { run, broker, close };
+  async function resume(batchId, expectedPlanHash) {
+    const receipts = [];
+    let enteredRecovery = false;
+    try {
+      const state = await broker({ action:'status' });
+      const batch = state.batches?.[batchId];
+      if (state.active !== batchId || !batch || batch.planHash !== expectedPlanHash ||
+          batch.status !== 'HALTED' || !batch.receipt) throw new Error('RECONCILE_IDENTITY');
+      enteredRecovery = true;
+      const identity = { batchId, planHash:expectedPlanHash, expectedError:batch.error };
+      // Earlier pages already passed full preservation checks. Validate their
+      // durable receipts, then leave any subsequent worker records untouched.
+      await broker({ action:'reconcile_receipts', ...identity });
+      await broker({ action:'reconcile_unwritten', ...identity, ticket:batch.receipt.ticket,
+        page:await tools.mcp__codex_apps__notion_fetch({ id:batch.edits[batch.next].pageId }) });
+      for (let index=batch.next; index<batch.edits.length; index++) {
+        const edit=batch.edits[index];
+        // Keep the immutable pending snapshot and ticket on the first page.
+        const prepared=index===batch.next ? batch.receipt : await broker({ action:'prepare', batchId,
+          page:await tools.mcp__codex_apps__notion_fetch({ id:edit.pageId }) });
+        const authorized=await broker({ action:'authorize', batchId, ticket:prepared.ticket,
+          page:await tools.mcp__codex_apps__notion_fetch({ id:edit.pageId }) });
+        await update(authorized.request);
+        const verified=await broker({ action:'verify', batchId, ticket:prepared.ticket,
+          page:await tools.mcp__codex_apps__notion_fetch({ id:edit.pageId }) });
+        receipts.push({ pageId:edit.pageId, ...verified, snapshot:prepared.snapshot });
+      }
+      return { status:'COMPLETED', resumed:true, receipts };
+    } catch (error) {
+      if (enteredRecovery) {
+        try { await broker({ action:'halt', batchId, reason:error.message }); } catch { /* Preserve HALTED. */ }
+      }
+      throw error;
+    } finally { await close(); }
+  }
+  async function reconcileAutolink(batchId, expectedPlanHash, snapshotHash, actualHash, actualSnapshotHash) {
+    try {
+      const state = await broker({ action:'status' });
+      const batch = state.batches?.[batchId];
+      if (state.active !== batchId || !batch || batch.planHash !== expectedPlanHash ||
+          batch.status !== 'HALTED' || batch.error !== 'READBACK_MISMATCH' ||
+          batch.edits.length !== 1 || batch.next !== 0 || !batch.receipt)
+        throw new Error('RECONCILE_IDENTITY');
+      return await broker({ action:'reconcile_autolink', batchId, planHash:expectedPlanHash,
+        expectedError:'READBACK_MISMATCH', ticket:batch.receipt.ticket, snapshotHash, actualHash, actualSnapshotHash,
+        page:await tools.mcp__codex_apps__notion_fetch({ id:batch.edits[0].pageId }) });
+    } finally { await close(); }
+  }
+  return { run, resume, reconcileAutolink, broker, close };
 })
