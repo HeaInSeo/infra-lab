@@ -21,6 +21,10 @@
   const must=(ok,why)=>{if(!ok)throw new Error('PROJECTION_BUNDLE: '+why);};
   const stable=value=>JSON.stringify(Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))));
   const count=(text,literal)=>text.split(literal).length-1;
+  function identity(text,marker){
+    return typeof text==='string'&&(text===marker||text.startsWith(marker+';'))&&
+      [...text.matchAll(/(?:^|[^A-Za-z0-9_])observation_id\s*=/g)].length===1;
+  }
   function data(raw,id){
     for(let n=0;n<5&&raw?.structuredContent;n++){
       must(!raw.isError,'Fetch failed');raw=raw.structuredContent;
@@ -49,13 +53,13 @@
     const edits=bodies.map(([id,heading])=>{
       const e=bundle.edits.find(e=>e.pageId===id);
       must(e&&e.heading===heading&&typeof e.oldStr==='string'&&e.oldStr.length>0&&e.oldStr!==e.newStr&&
-        typeof e.newStr==='string'&&e.newStr.includes(marker),'Wrong target/heading or missing shared observation ID');
+        identity(e.newStr,marker),'Wrong target/heading or missing unique shared observation ID');
       return e;
     });
     for(const id of native){
       const n=bundle.native.find(n=>n.pageId===id),p=n?.properties;
       must(p&&requiredProps.every(k=>Object.hasOwn(p,k))&&Object.keys(p).every(k=>centralProps.has(k))&&
-        typeof p['큐 정리 근거']==='string'&&p['큐 정리 근거'].includes(marker),'Native central metadata manifest required');
+        identity(p['큐 정리 근거'],marker),'Native central metadata manifest with unique identity required');
     }
     return {edits,native,ids:[...new Set([...native,...bodies.map(([id])=>id)])]};
   }

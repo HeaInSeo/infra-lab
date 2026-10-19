@@ -21,7 +21,7 @@ const headings={
 function fixture(repositories=['nodekit','sori'],fault){
   const ids=repositories.flatMap(r=>r==='nodekit'?nk:sw),bodies=repositories.flatMap(r=>r==='nodekit'?[ni]:[...sw,si]).concat(shared);
   const properties={'작업 상태':'검증대기','다음 담당자':'설계 에이전트','큐 구획':'조건 대기',
-    '차단 대상':'existing owner trigger','재개 지시':'existing exact next action','큐 정리 근거':marker+' existing source'};
+    '차단 대상':'existing owner trigger','재개 지시':'existing exact next action','큐 정리 근거':marker+'; existing source'};
   const bundle={observationId:'SYNC-TEST-1',repositories,
     native:ids.map(pageId=>({pageId,properties:structuredClone(properties)})),
     edits:bodies.map(pageId=>({pageId,heading:headings[pageId],oldStr:'status=OLD-'+pageId,newStr:marker+'; status=NEW-'+pageId}))};
@@ -69,9 +69,17 @@ for(const [name,mutate] of [
   ['duplicate repo',b=>{b.repositories=['nodekit','nodekit'];}],
   ['unknown repo',b=>{b.repositories=['nodevault'];}],
   ['duplicate body',b=>{b.edits[0]=b.edits[1];}],
+  ['body previous identity only',b=>{b.edits[0].newStr=b.edits[0].newStr.replace('observation_id=','previous_observation_id=');}],
+  ['body conflicting identities',b=>{b.edits[0].newStr+='; observation_id=`STALE`';}],
+  ['body duplicate identities',b=>{b.edits[0].newStr+='; '+marker;}],
+  ['body whitespace identity duplicate',b=>{b.edits[0].newStr+='; observation_id =`STALE`';}],
+  ['metadata previous identity only',b=>{b.native[0].properties['큐 정리 근거']=marker.replace('observation_id=','previous_observation_id=');}],
+  ['metadata conflicting identities',b=>{b.native[0].properties['큐 정리 근거']+='; observation_id=`STALE`';}],
+  ['metadata duplicate identities',b=>{b.native[0].properties['큐 정리 근거']+='; '+marker;}],
+  ['metadata whitespace identity duplicate',b=>{b.native[0].properties['큐 정리 근거']+='; observation_id =`STALE`';}],
   ['wrong native page',b=>{b.native[0].pageId='f'.repeat(32);}]
 ])test('reject invalid complete manifest: '+name,async()=>{
-  const f=fixture();mutate(f.bundle);await assert.rejects(f.client.run(f.bundle));assert.equal(f.calls,0);
+  const f=fixture();mutate(f.bundle);await assert.rejects(f.client.run(f.bundle));assert.equal(f.calls,0);assert.equal(f.reads,0);
 });
 test('drifting native current metadata prevents any body mutation',async()=>{
   const f=fixture();f.pages.get(nk[0]).props['차단 대상']='old long-running Codex';

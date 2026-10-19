@@ -8,6 +8,8 @@ const ROOT='/home/heain/.local/state/notion-projection-guard';
 const RUNTIME='/home/heain/.local/share/notion-projection-guard';
 const BATCH='QSYNC-20261019T132702Z-NK138-LANDED-SORI43-RECIRCULATE';
 const PLAN='677ffcf80f9e3c7855b8a1a02f79ab7cf1513e1ce8649cb45f2919d901d2b065';
+const SNAPSHOT_HASH='2ce6f5f8edcc0ec3cf913594f273577776cac70b0f1044d999a5b8f91aac6a55';
+const VERIFIED_HASH='c779eeb630d4057d709653b1600102ce9c80b6673123d75cc5cb5b46c7ef2193';
 const ERROR='REMOTE_ERROR: tool call error: tool call failed for `codex_apps/remote_desktop_commander.read_process_output`\n\nCaused by:\n    Mcp error: -32603: Internal error';
 const IDS=['3f086e6dd1d1818e9aecdc093a08cda9','3f586e6dd1d181ebb43dd7de62aa2ca4',
   '3f586e6dd1d181cd9f5bdcdab6290de7','3f586e6dd1d181ddb9f3e7217f64bfcd',
@@ -41,6 +43,8 @@ function inspect(broker,raw){
   must(Array.isArray(raw)&&raw.length===7,'Seven fresh complete ordered page reads required');
   const pages=raw.map((value,i)=>pageData(value,IDS[i]));
   const edit=b.edits[0],file=broker.snapshot(BATCH,0),snap=read(file),verified=read(file+'.verified.json');
+  must(hash(fs.readFileSync(file,'utf8'))===SNAPSHOT_HASH&&
+    hash(fs.readFileSync(file+'.verified.json','utf8'))===VERIFIED_HASH,'Complete original snapshot or verified receipt changed');
   must(snap.batchId===BATCH&&snap.index===0&&typeof snap.ticket==='string'&&snap.ticket.length>0&&
     JSON.stringify(snap.edit)===JSON.stringify(edit)&&hash(snap.page.body)===snap.bodyHash&&
     hash(snap.page.properties)===snap.propertiesHash&&hash(snap.expected)===snap.expectedHash&&

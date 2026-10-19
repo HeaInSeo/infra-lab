@@ -15,7 +15,9 @@ function raw(i,literal,props={title:'Private test'},revision='fresh'){
 }
 function helper(f,overrides={}){
   let source=fs.readFileSync(path.join(__dirname,'reconcile_transport_preprepare.cjs'),'utf8');
-  for(const [name,value] of Object.entries({ROOT:f.root,RUNTIME:f.runtime,PLAN:hash(JSON.stringify(f.edits))}))
+  for(const [name,value] of Object.entries({ROOT:f.root,RUNTIME:f.runtime,PLAN:hash(JSON.stringify(f.edits)),
+    SNAPSHOT_HASH:hash(fs.readFileSync(f.b.snapshot(BATCH,0),'utf8')),
+    VERIFIED_HASH:hash(fs.readFileSync(f.b.snapshot(BATCH,0)+'.verified.json','utf8'))}))
     source=source.replace(new RegExp("const "+name+"='[^']*';"),'const '+name+'='+JSON.stringify(value)+';');
   source=source.replace('804709b778ea5fe82eac705654d06f52af8391aa0504d8e0582f3a87022fdf1b',hash(fs.readFileSync(path.join(f.runtime,'policy.json'),'utf8')));
   const module={exports:{}};
@@ -75,6 +77,8 @@ for(const [name,mutate] of [
   ['prepared next page',f=>{atomic(f.b.snapshot(BATCH,1),{ticket:'possible-write'});}],
   ['unexpected actual receipt',f=>{atomic(f.b.snapshot(BATCH,0)+'.actual.json',{});}],
   ['missing verified receipt',f=>{fs.unlinkSync(f.b.snapshot(BATCH,0)+'.verified.json');}],
+  ['deleted receipt timestamp',f=>{const p=f.b.snapshot(BATCH,0)+'.verified.json',s=JSON.parse(fs.readFileSync(p));delete s.at;atomic(p,s);}],
+  ['replaced receipt timestamp',f=>{const p=f.b.snapshot(BATCH,0)+'.verified.json',s=JSON.parse(fs.readFileSync(p));s.at='different';atomic(p,s);}],
   ['tampered prior receipt',f=>{const p=f.b.snapshot(BATCH,0)+'.verified.json',s=JSON.parse(fs.readFileSync(p));s.page.body+='bad';atomic(p,s);}],
   ['tampered snapshot',f=>{const p=f.b.snapshot(BATCH,0),s=JSON.parse(fs.readFileSync(p));s.page.body+='bad';atomic(p,s);}],
   ['changed completed body',f=>{f.raw[0]=raw(0,f.edits[0].newStr+' changed');}],
