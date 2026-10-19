@@ -118,10 +118,36 @@ function bareAutolinks(text) {
     .map(match => match[0]);
 }
 function stableNewText(edit) {
+  inlineSpans(edit.oldStr);inlineSpans(edit.newStr);
   if (bareAutolinks(edit.newStr).length)
     fail('AUTOLINK_RISK', 'Wrap hostname-shaped filenames and URLs in inline code or an explicit Markdown link');
   if (plainMarkup(edit.newStr).includes('->'))
     fail('MARKDOWN_ESCAPE_RISK', 'Use a Unicode arrow or inline code instead of a plain ASCII arrow');
+}
+function inlineSpans(text) {
+  // Escapes outside spans are Markdown escapes; inside, backslashes are literal.
+  const spans=[]; let open=null;
+  for(let i=0;i<text.length;) {
+    if(!open && text[i]==='\\') { i+=2; continue; }
+    if(text[i]!=='`') { i++; continue; }
+    let end=i+1; while(text[end]==='`')end++;
+    const size=end-i;
+    if(!open)open={start:i,size};
+    else if(size===open.size){spans.push({start:open.start,end});open=null;}
+    i=end;
+  }
+  if(open)fail('INLINE_CODE_BOUNDARY','Use complete balanced inline-code fields; never cut a field to fit the limit');
+  return spans;
+}
+function inlineEdit(body,index,edit) {
+  const start=body.lastIndexOf('\n',index-1)+1;
+  const stop=body.indexOf('\n',index+edit.oldStr.length);
+  const line=body.slice(start,stop<0?body.length:stop),a=index-start,b=a+edit.oldStr.length;
+  for(const span of inlineSpans(line))
+    if((a>span.start&&a<span.end)||(b>span.start&&b<span.end))
+      fail('INLINE_CODE_BOUNDARY','Selection begins or ends inside an existing inline-code field');
+  inlineSpans(edit.oldStr);inlineSpans(edit.newStr);
+  inlineSpans(line.slice(0,a)+edit.newStr+line.slice(b));
 }
 function reviewedArrowLiteral(edit) {
   if (bareAutolinks(edit.newStr).length ||
@@ -149,6 +175,7 @@ function plan(page, edit) {
   if (/\b(?:event_id|session_id|lease_state)\s*[":=]/.test(content))
     fail('PROTECTED_SECTION', 'Worker own proof is present in the section');
   const before = page.body.slice(0, index), after = page.body.slice(index + edit.oldStr.length);
+  inlineEdit(page.body,index,edit);
   const expected = before + edit.newStr + after;
   if (page.body.includes(edit.newStr)) fail('AMBIGUOUS_RESULT', 'New literal already occurs in the body');
   return { expected, beforeHash: hash(before), afterHash: hash(after), index,
@@ -419,7 +446,7 @@ class Broker {
     if (action === 'close') return { status: 'CLOSED' };
     if (typeof batchId !== 'string' || !/^[a-zA-Z0-9_.:-]{1,150}$/.test(batchId) ||
         ['__proto__', 'prototype', 'constructor'].includes(batchId)) fail('BATCH_ID', 'Stable safe observation ID required');
-    if (action === 'begin') {
+    if (action === 'begin' || action === 'validate_batch') {
       const edits = input.edits;
       if (!Array.isArray(edits) || !edits.length || edits.length > 30) fail('EDIT_SCHEMA', '1–30 page edits required');
       const seen = new Set();
@@ -438,8 +465,14 @@ class Broker {
       }
       edits.forEach(stableNewText);
       if (this.state.active) fail('UNRESOLVED_BATCH', 'Previous batch must verify or be reconciled before any new batch');
+      if(action==='validate_batch')return {status:'READY',next:0};
       this.state.batches[batchId] = { planHash: key, edits: clone(edits), next: 0, status: 'READY', receipt: null };
       this.state.active = batchId; this.save(); return { status: 'READY', next: 0 };
+    }
+    if(action==='preflight') {
+      validateScope(input.edit,this.policy);stableNewText(input.edit);
+      const p=plan(pageData(input.page,input.edit.pageId),input.edit);
+      return {status:'SAFE_LITERAL',expectedHash:hash(p.expected),beforeHash:p.beforeHash,afterHash:p.afterHash};
     }
     if (action === 'reconcile_autolink') return this.reconcileAutolink(input);
     if (action === 'reconcile_escaped_arrows') return this.reconcileRendering(input, 'arrows');

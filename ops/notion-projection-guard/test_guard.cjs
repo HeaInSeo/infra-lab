@@ -108,7 +108,7 @@ test('W02 runner uses only two exact content requests and preserves both complet
   const f=runnerFixture(t,null,{centralSections:w02Sections});
   for(const s of w02Sections) f.pages.set(s.pageId,page(s.pageId,w02Body(s)));
   const result=await f.runner.run('observation',w02Sections.map(s=>w02Edit(s)));
-  assert.equal(result.status,'COMPLETED');assert.equal(f.writes,2);assert.equal(f.fetches,6);
+  assert.equal(result.status,'COMPLETED');assert.equal(f.writes,2);assert.equal(f.fetches,8);
   for(const s of w02Sections) assert.equal(pageData(f.pages.get(s.pageId),s.pageId).body,w02Body(s,newStr));
 });
 for (const sections of [null,{},[w02Sections[0],w02Sections[0]],
@@ -255,7 +255,7 @@ function runnerFixture(t, fault, policy={}) {
 }
 test('real orchestration uses broker requests, fresh pre/post reads and sequential pages',async t=>{
   const f=runnerFixture(t);const r=await f.runner.run('observation',[edit(),edit(B)]);
-  assert.equal(r.status,'COMPLETED');assert.equal(f.writes,2);assert.equal(f.fetches,6);assert.equal(f.closed,true);
+  assert.equal(r.status,'COMPLETED');assert.equal(f.writes,2);assert.equal(f.fetches,8);assert.equal(f.closed,true);
 });
 for(const fault of ['readback','lost-ack','async'])test('connector '+fault+' prevents second Notion mutation',async t=>{
   const f=runnerFixture(t,fault);await assert.rejects(f.runner.run('observation',[edit(),edit(B)]));
@@ -268,11 +268,11 @@ test('completed observation replays no mutation even for prefix expansion',async
 });
 test('DC consumed cursor: retained response by exact ID avoids resend and permits verification',async t=>{
   const f=runnerFixture(t,'cursor');assert.equal((await f.runner.run('observation',[edit()])).status,'COMPLETED');
-  assert.equal(f.writes,1);assert.equal(f.fetches,3);assert.equal(f.closed,true);
+  assert.equal(f.writes,1);assert.equal(f.fetches,4);assert.equal(f.closed,true);
 });
 test('native Notion content-only JSON ACK is recognized and then fully read back',async t=>{
   const f=runnerFixture(t,'content-only');assert.equal((await f.runner.run('observation',[edit(),edit(B)])).status,'COMPLETED');
-  assert.equal(f.writes,2);assert.equal(f.fetches,6);
+  assert.equal(f.writes,2);assert.equal(f.fetches,8);
 });
 
 test('large JSON with regex metacharacters never enters DC prompt matching',async t=>{
@@ -483,7 +483,7 @@ test('explicit code or Markdown links are admitted, escaped and unclosed markup 
   }
   for(const s of ['tool=package-cli.sh','tool=`package-cli.sh','tool=\\`package-cli.sh\\`',
     'tool=\\[package-cli.sh](http://package-cli.sh)','tool=https://example.com/file']) {
-    const {b}=fixture(t);rejects('AUTOLINK_RISK',()=>begin(b,[edit(A,{newStr:s})]));assert.equal(b.state.active,null);
+    const {b}=fixture(t);assert.throws(()=>begin(b,[edit(A,{newStr:s})]),e=>['AUTOLINK_RISK','INLINE_CODE_BOUNDARY'].includes(e.code));assert.equal(b.state.active,null);
   }
 });
 test('runner explicit autolink reconciliation performs one fresh fetch and zero Notion mutations',async t=>{
@@ -600,3 +600,27 @@ require('./router_stale_prewrite_cases.cjs');
 require('./transport_preprepare_cases.cjs');
 require('./complete_projection_cases.cjs');
 
+
+test('reject the real V02 cut before claiming a batch or reading/writing Notion',async t=>{
+  const f=runnerFixture(t);
+  const bad=edit(B,{oldStr:'observation_id=`OLD`; V02=`Lookup/GetJob reused; new candidate;',newStr:'observation_id=`NEW`; next=`Codex`;'});
+  await assert.rejects(f.runner.run('v02-cut',[edit(),bad]),/INLINE_CODE_BOUNDARY/);
+  assert.equal(f.writes,0);assert.equal(f.fetches,0);assert.equal(f.f.b.state.active,null);
+});
+test('a later selection inside an existing span stops all writes during batch preflight',async t=>{
+  const f=runnerFixture(t);f.pages.set(B,page(B,body('key=`'+oldStr+'`')));
+  await assert.rejects(f.runner.run('inside-span',[edit(),edit(B)]),/INLINE_CODE_BOUNDARY/);
+  assert.equal(f.writes,0);assert.equal(f.f.b.state.active,null);
+});
+for(const value of ['field=`value`','field=``literal ` tick``','field=\\`escaped tick','path=`C:\\work\\`'])
+  test('complete stable code fields remain supported '+value,t=>{
+    const {b}=fixture(t);begin(b,[edit(A,{newStr:value})]);const r=prepare(b);authorize(b,r);
+    assert.equal(verify(b,r,page(A,body(value))).status,'COMPLETED');
+  });
+for(const change of [{oldStr:'status',newStr:'state'},{oldStr:'`'+oldStr,newStr:'`'+newStr}])
+  test('prepare independently rejects an edge inside a code span '+JSON.stringify(change),t=>{
+    const {b}=fixture(t),e=edit(A,change);
+    if(change.oldStr.startsWith('`')) {rejects('INLINE_CODE_BOUNDARY',()=>begin(b,[e]));return;}
+    begin(b,[e]);rejects('INLINE_CODE_BOUNDARY',()=>prepare(b,page(A,body('key=`'+oldStr+'`'))));
+  });
+require('./v02_partial_cases.cjs');

@@ -309,3 +309,31 @@ No runtime broker/runner replacement, policy expansion or new state directory
 is involved. A crash after the private audit but before closure remains blocked
 and requires separate reconciliation; do not delete that audit to retry.
 
+
+## Inline field boundaries and whole-batch preflight
+
+The broker now rejects incomplete backtick spans in old and new literals. The
+planner also checks each selection against the complete affected line, rejecting
+an edge inside an existing span. Escaped ticks outside code and literal backslashes
+inside code remain distinct. This is a conservative single-line editing grammar,
+not a general Markdown normalizer. The exact verifier remains unchanged.
+
+The runner validates admission without claiming a journal batch, then preflights
+all remaining complete target pages through that planner before `begin` or any
+Notion mutation. Each ordinary prepare/authorize repeats the check on fresh reads.
+A bad later selection therefore produces zero writes and no new HALTED batch.
+This is required for both direct guarded updates and the complete-manifest entry.
+Deploy the reviewed broker and runner together under verified runtime pins.
+
+`reconcile_v02_partial.cjs` is explicitly restricted to the original nine-page
+CENTRAL-20261019T153711Z-NK139-SORI43-GATES incident. It pins all eight complete
+snapshot/receipt files, the immutable plan/ticket and the single recorded central
+suffix escape, and requires nine fresh full readbacks. It never accepts that
+escape as unchanged protected content. Explicit apply saves a private audit and
+marks the same batch RECONCILED_PARTIAL, retaining next=3, ticket, error, edits
+and original planHash. No Notion write, successful ACK or page advance occurs.
+The five untouched old instructions are not replayed. A separately guarded bounded
+repair restores the original central V01/V02 fields and valid code boundaries;
+a fresh complete observation then consumes the later genuine NodeKit paired PASS
+alongside Sori's PASS. Only that full readback can establish current synchronization.
+The helper defaults to check-only and cannot be called automatically by run/resume.

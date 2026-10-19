@@ -99,9 +99,17 @@
     }
   }
   async function run(batchId, edits) {
+    edits=JSON.parse(JSON.stringify(edits));
     const receipts = [];
     let enteredRun = false;
     try {
+      const checked=await broker({action:'validate_batch',batchId,edits});
+      if(checked.status==='COMPLETED')return {status:'COMPLETED',replayed:false,alreadyConsumed:true,receipts};
+      if(checked.status!=='READY')throw new Error('UNRESOLVED_BATCH: '+checked.status);
+      // Inspect all targets before claiming a batch or issuing its first write.
+      // Prepare/authorize repeat the same plan against fresh complete reads.
+      for(let i=checked.next;i<edits.length;i++)await broker({action:'preflight',batchId,
+        edit:edits[i],page:await tools.mcp__codex_apps__notion_fetch({id:edits[i].pageId})});
       const begin = await broker({ action: 'begin', batchId, edits });
       if (begin.status === 'COMPLETED') return { status: 'COMPLETED', replayed: false, alreadyConsumed: true, receipts };
       if (begin.status !== 'READY') throw new Error('UNRESOLVED_BATCH: '+begin.status);

@@ -29,6 +29,7 @@ function loadHelper(f,overrides={}){
     source=source.replace(new RegExp("const "+name+"='[^']*';"),'const '+name+'='+JSON.stringify(value)+';');
   source=source.replace('804709b778ea5fe82eac705654d06f52af8391aa0504d8e0582f3a87022fdf1b',
     hash(fs.readFileSync(path.join(f.runtime,'policy.json'),'utf8')));
+  for(const [name,pin] of Object.entries({'broker.cjs':'b0b07630eebb9d2ebbc8a4c85bd9cdded9ca2c5432a66a8cebd45e7d8f1f102c','runner.js':'278b3e544f9ba10538f73901c705262d9a3ef76232a931d67da6ed80750c6d52'}))source=source.replaceAll(pin,hash(fs.readFileSync(path.join(f.runtime,name),'utf8')));
   const module={exports:{}};
   const req=name=>name==='./broker.cjs'?{...guard,...overrides}:require(name);
   vm.runInNewContext(source,{module,require:req,__dirname:f.runtime,process,console,Buffer},{filename:'reviewed-stale-helper.cjs'});
