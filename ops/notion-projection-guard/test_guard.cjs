@@ -162,7 +162,7 @@ test('no guessed end boundary at page end',t=>{
 });
 test('central-looking heading in code or synced block is not an editable section',t=>{
   const {b}=fixture(t);begin(b);
-  for (const content of ['```\n'+body()+'\n```','<synced_block url="x">\n'+body()+'\n</synced_block>'])
+  for (const content of ['````\n'+body()+'\n````','<synced_block url="x">\n'+body()+'\n</synced_block>'])
     rejects('AMBIGUOUS_SECTION',()=>prepare(b,page(A,content)));
 });
 test('worker event moved into central section is protected',t=>{
@@ -641,5 +641,15 @@ test('an apparent central section wholly inside a multiline span is never owned'
 test('a fake owned heading inside multiline code rejects the whole run before writes',async t=>{
  const f=runnerFixture(t);f.pages.set(B,page(B,'intro=`starts\n'+heading+'\n'+oldStr+'\n## NEXT\nends`\n'));
  await assert.rejects(f.runner.run('fake-heading',[edit(),edit(B)]),/AMBIGUOUS_SECTION/);
+ assert.equal(f.writes,0);assert.equal(f.f.b.state.active,null);
+});
+for(const [name,prefix,suffix] of [
+ ['native close suffix','<details>\ntext\n</details> intro=`starts\n','\n## NEXT\nends`\n'],
+ ['native inner span','<details>\nintro=`starts\n</details>\n','\n## NEXT\nends`\n'],
+ ['native open suffix','<details> intro=`starts\n</details>\n','\n## NEXT\nends`\n'],
+ ['fence close suffix','```text\nbody\n``` intro=`starts\n','\n## NEXT\nends`\n']
+])test('structural boundary cannot hide an inline opener: '+name,async t=>{
+ const f=runnerFixture(t);f.pages.set(B,page(B,prefix+heading+'\n'+oldStr+suffix));
+ await assert.rejects(f.runner.run('structural-boundary',[edit(),edit(B)]),/STRUCTURE|AMBIGUOUS_SECTION|UNBOUNDED_SECTION/);
  assert.equal(f.writes,0);assert.equal(f.f.b.state.active,null);
 });

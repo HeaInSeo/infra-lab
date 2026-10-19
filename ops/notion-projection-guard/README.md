@@ -318,6 +318,8 @@ an edge inside an existing span. Escaped ticks outside code and literal backslas
 inside code remain distinct. Delimiter state carries across preceding lines so
 two multiline spans cannot be mispaired on the selected line. Heading discovery carries the same state from before the section: an apparent
 central heading inside a multiline code span grants no ownership.
+Native structural tags and closing fences must occupy their own line; trailing
+text cannot hide a new span. Ordinary text inside containers shares the lexer.
 This is a conservative editing grammar, not a general Markdown normalizer. The exact verifier remains unchanged.
 
 The runner validates admission without claiming a journal batch, then preflights

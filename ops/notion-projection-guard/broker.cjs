@@ -69,15 +69,31 @@ function headings(body) {
     if(inline) { inline=scanInline(line,inline).open;offset+=line.length+1;continue; }
     const code = line.match(/^\s*(`{3,}|~{3,})/);
     if (code) {
-      if (!fence) fence = { char: code[1][0], size: code[1].length };
-      else if (code[1][0] === fence.char && code[1].length >= fence.size) fence = null;
+      if (!fence) {
+        if(code[1][0]==='`' && line.slice(code[0].length).includes('`'))fail('STRUCTURE','Backtick fence info cannot contain backticks');
+        fence = { char: code[1][0], size: code[1].length };
+      } else if (code[1][0] === fence.char && code[1].length >= fence.size) {
+        if(line.slice(code[0].length).trim())fail('STRUCTURE','Closing fence must occupy its own line');
+        fence = null;
+      }
     } else if (!fence) {
       const c = line.match(close), o = line.match(open);
-      if (c) { if (stack.pop() !== c[1]) fail('STRUCTURE', 'Unbalanced native container'); }
-      else if (o && !/\/>\s*$/.test(line)) stack.push(o[1]);
-      else if (!stack.length) {
+      if(c || o) {
+        // Structural tags must occupy their line; quoted attribute values may
+        // contain >. Never silently discard a trailing inline-code opener.
+        let quote=null,end=-1;
+        for(let i=0;i<line.length;i++) {
+          if(quote){if(line[i]===quote)quote=null;}
+          else if(line[i]==='"'||line[i]==="'")quote=line[i];
+          else if(line[i]==='>'){end=i+1;break;}
+        }
+        if(end<0||line.slice(end).trim())fail('STRUCTURE','Native structural tag must occupy its own line');
+        if(c){if(stack.pop()!==c[1])fail('STRUCTURE','Unbalanced native container');}
+        else if(!/\/>\s*$/.test(line))stack.push(o[1]);
+      } else {
         const h = line.match(/^(#{1,4}) (.+)$/);
-        if (h) result.push({ text: line, level: h[1].length, start: offset, end: offset + line.length });
+        if (h && !stack.length) result.push({ text: line, level: h[1].length, start: offset, end: offset + line.length });
+        // Ordinary text inside containers can also open a multiline span.
         inline=scanInline(line).open;
       }
     }
