@@ -313,9 +313,10 @@ and requires separate reconciliation; do not delete that audit to retry.
 ## Inline field boundaries and whole-batch preflight
 
 The broker now rejects incomplete backtick spans in old and new literals. The
-planner also checks each selection against the complete affected line, rejecting
+planner also checks each selection against the complete owned central section, rejecting
 an edge inside an existing span. Escaped ticks outside code and literal backslashes
-inside code remain distinct. This is a conservative single-line editing grammar,
+inside code remain distinct. Delimiter state carries across preceding lines so
+two multiline spans cannot be mispaired on the selected line. This is a conservative editing grammar,
 not a general Markdown normalizer. The exact verifier remains unchanged.
 
 The runner validates admission without claiming a journal batch, then preflights

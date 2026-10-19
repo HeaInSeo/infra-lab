@@ -624,3 +624,13 @@ for(const change of [{oldStr:'status',newStr:'state'},{oldStr:'`'+oldStr,newStr:
     begin(b,[e]);rejects('INLINE_CODE_BOUNDARY',()=>prepare(b,page(A,body('key=`'+oldStr+'`'))));
   });
 require('./v02_partial_cases.cjs');
+test('multiline spans cannot mispair the affected line and admit an edit inside code',async t=>{
+  const f=runnerFixture(t),content=heading+'\nfirst=`prior line\nclosing`; outside; second=`'+oldStr+'\nlast`;\n## HISTORICAL WORKER PROOF\n'+history;
+  f.pages.set(B,page(B,content));
+  await assert.rejects(f.runner.run('multiline-boundary',[edit(),edit(B)]),/INLINE_CODE_BOUNDARY/);
+  assert.equal(f.writes,0);assert.equal(f.f.b.state.active,null);
+});
+test('direct planner rejects a code-span cut when its opener is on a prior line',t=>{
+  const content=heading+'\nfirst=`prior line\nclosing`; outside; second=`'+oldStr+'\nlast`;\n## HISTORICAL WORKER PROOF\n'+history;
+  rejects('INLINE_CODE_BOUNDARY',()=>plan(pageData(page(A,content),A),edit()));
+});

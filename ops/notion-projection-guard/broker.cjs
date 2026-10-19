@@ -139,15 +139,15 @@ function inlineSpans(text) {
   if(open)fail('INLINE_CODE_BOUNDARY','Use complete balanced inline-code fields; never cut a field to fit the limit');
   return spans;
 }
-function inlineEdit(body,index,edit) {
-  const start=body.lastIndexOf('\n',index-1)+1;
-  const stop=body.indexOf('\n',index+edit.oldStr.length);
-  const line=body.slice(start,stop<0?body.length:stop),a=index-start,b=a+edit.oldStr.length;
-  for(const span of inlineSpans(line))
+function inlineEdit(body,index,edit,start,stop) {
+  // Parse from the owned section boundary, not the affected line: a span can
+  // open on a preceding line and close here before another multiline span.
+  const content=body.slice(start,stop),a=index-start,b=a+edit.oldStr.length;
+  for(const span of inlineSpans(content))
     if((a>span.start&&a<span.end)||(b>span.start&&b<span.end))
       fail('INLINE_CODE_BOUNDARY','Selection begins or ends inside an existing inline-code field');
   inlineSpans(edit.oldStr);inlineSpans(edit.newStr);
-  inlineSpans(line.slice(0,a)+edit.newStr+line.slice(b));
+  inlineSpans(content.slice(0,a)+edit.newStr+content.slice(b));
 }
 function reviewedArrowLiteral(edit) {
   if (bareAutolinks(edit.newStr).length ||
@@ -175,7 +175,7 @@ function plan(page, edit) {
   if (/\b(?:event_id|session_id|lease_state)\s*[":=]/.test(content))
     fail('PROTECTED_SECTION', 'Worker own proof is present in the section');
   const before = page.body.slice(0, index), after = page.body.slice(index + edit.oldStr.length);
-  inlineEdit(page.body,index,edit);
+  inlineEdit(page.body,index,edit,section.end,boundary.start);
   const expected = before + edit.newStr + after;
   if (page.body.includes(edit.newStr)) fail('AMBIGUOUS_RESULT', 'New literal already occurs in the body');
   return { expected, beforeHash: hash(before), afterHash: hash(after), index,
