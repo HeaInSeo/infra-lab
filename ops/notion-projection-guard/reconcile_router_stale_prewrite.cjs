@@ -17,6 +17,8 @@ const ROUTER_PROPS='e828f06c39d3c4e7c88c37b03e914e0a2121e62e1e1ebbce4e827564c40c
 const ROUTER_REVISION='2026-10-19T08:01:46.997Z';
 const REVIEW_EVENT='EVT-GR-SORI-W02-1B-I-AUTH-REVIEW-RELEASE-20261019T084331Z';
 const REVIEW_HEAD='d0d1602d315de8f79b31b0656a9101b7a9cb8d9c';
+const REVIEW_BODY='5a6ab19df6e06ebfc6fa48001de3f1e2b19d2a5b681c603a23bb5064c9d46769';
+const REVIEW_REVISION='2026-10-19T08:44:19.258Z';
 const PINS={'broker.cjs':'b0b07630eebb9d2ebbc8a4c85bd9cdded9ca2c5432a66a8cebd45e7d8f1f102c',
   'policy.json':'804709b778ea5fe82eac705654d06f52af8391aa0504d8e0582f3a87022fdf1b',
   'runner.js':'278b3e544f9ba10538f73901c705262d9a3ef76232a931d67da6ed80750c6d52'};
@@ -60,8 +62,8 @@ function inspect(broker,raw){
       saved.body===snap.expected&&saved.body===verified.page.body&&verified.bodyHash===snap.expectedHash&&
       saved.properties===snap.page.properties&&saved.properties===verified.page.properties&&
       saved.revision===verified.page.revision,'Original full protected-content receipt changed');
-    // Later real worker records are retained. No completed page is rewritten.
-    // Its central literal must still be unique and inside its original scope.
+    // No completed page is rewritten. Other completed pages may retain later
+    // real worker records; the authoritative paired body is pinned below.
     plan(pages[i],{...edit,oldStr:edit.newStr,newStr:'central_recovery_scope_check='+i+';'+hash(BATCH)});
     receipts.push({index:i,pageId:IDS[i],snapshotHash:hash(fs.readFileSync(file,'utf8')),
       verifiedHash:hash(fs.readFileSync(file+'.verified.json','utf8')),
@@ -76,6 +78,12 @@ function inspect(broker,raw){
   let missing=false;
   try{plan(router,edit);}catch(e){missing=e.code==='AMBIGUOUS_LITERAL';}
   must(missing,'Original final edit must fail before prepare');
+  // This recovery is deliberately bound to the reviewed complete paired page,
+  // not a search for an old RELEASE anywhere in mutable worker history. A
+  // later CLAIM/HOLD, moved/quoted old JSON, or any other body/revision change
+  // rejects closure and requires a separate reviewed source reconciliation.
+  must(hash(pages[1].body)===REVIEW_BODY&&pages[1].revision===REVIEW_REVISION,
+    'Reviewed authoritative paired worker body or revision changed');
   const eventText=pages[1].body.match(/QUEUE_EVENT_V1\s+(\{[^\n]+\})/);
   const event=eventText?JSON.parse(eventText[1]):null;
   must(event?.event_id===REVIEW_EVENT&&event.task_id==='SR-SORI-SM-W02.A-20261010'&&
@@ -86,7 +94,8 @@ function inspect(broker,raw){
   return {kind:'REVIEWED_UNWRITTEN_STALE_ROUTER_CLOSURE',batchId:BATCH,planHash:PLAN,error:ERROR,
     next:4,priorVerified:4,unwrittenFinalEdits:1,notionWrites:0,acknowledgedWrites:0,pageAdvances:0,
     routerBodyHash:ROUTER_BODY,routerPropertiesHash:ROUTER_PROPS,routerRevision:ROUTER_REVISION,
-    successorEvent:REVIEW_EVENT,successorHead:REVIEW_HEAD,receipts};
+    successorEvent:REVIEW_EVENT,successorHead:REVIEW_HEAD,
+    successorBodyHash:REVIEW_BODY,successorRevision:REVIEW_REVISION,receipts};
 }
 function apply(broker,raw,checkOnly=true){
   pins();must(broker.root===ROOT,'Canonical production state required');

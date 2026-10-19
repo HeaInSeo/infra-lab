@@ -24,7 +24,8 @@ function loadHelper(f,overrides={}){
   let source=fs.readFileSync(path.join(__dirname,'reconcile_router_stale_prewrite.cjs'),'utf8');
   for(const [name,value] of Object.entries({ROOT:f.root,RUNTIME:f.runtime,PLAN:hash(JSON.stringify(f.edits)),
     ROUTER_BODY:hash(pageData(f.raw[4],IDS[4]).body),ROUTER_PROPS:hash(pageData(f.raw[4],IDS[4]).properties),
-    ROUTER_REVISION:pageData(f.raw[4],IDS[4]).revision}))
+    ROUTER_REVISION:pageData(f.raw[4],IDS[4]).revision,REVIEW_BODY:hash(pageData(f.raw[1],IDS[1]).body),
+    REVIEW_REVISION:pageData(f.raw[1],IDS[1]).revision}))
     source=source.replace(new RegExp("const "+name+"='[^']*';"),'const '+name+'='+JSON.stringify(value)+';');
   source=source.replace('804709b778ea5fe82eac705654d06f52af8391aa0504d8e0582f3a87022fdf1b',
     hash(fs.readFileSync(path.join(f.runtime,'policy.json'),'utf8')));
@@ -120,6 +121,10 @@ for(const [name,mutate] of [
   ['missing latest successor RELEASE',f=>{f.raw[1]=raw(1,body(1,f.edits[1].newStr).replace(own.event_id,'old-event'));}],
   ['different successor head',f=>{f.raw[1]=raw(1,body(1,f.edits[1].newStr).replace(HEAD,'e'.repeat(40)));}],
   ['different successor role',f=>{f.raw[1]=raw(1,body(1,f.edits[1].newStr).replace('"role":"guardrail"','"role":"operator"'));}],
+  ['later successor CLAIM while old RELEASE remains',f=>{f.raw[1]=raw(1,body(1,f.edits[1].newStr)+'\n## CURRENT OWN EVENT\n```json\nQUEUE_EVENT_V1 '+JSON.stringify({...own,event_id:'later-claim',version:13,kind:'CLAIM',lease_state:'CLAIM_HELD'})+'\n```');}],
+  ['later successor HOLD while old RELEASE remains',f=>{f.raw[1]=raw(1,body(1,f.edits[1].newStr)+'\n## CURRENT OWN EVENT\n```json\nQUEUE_EVENT_V1 '+JSON.stringify({...own,event_id:'later-hold',version:13,kind:'HOLD'})+'\n```');}],
+  ['old RELEASE quoted outside worker record',f=>{f.raw[1]=raw(1,heads[1]+'\n'+f.edits[1].newStr+'\n## Quoted history\nQUEUE_EVENT_V1 '+JSON.stringify(own));}],
+  ['paired revision changed without a body delta',f=>{f.raw[1]=raw(1,body(1,f.edits[1].newStr),{title:'Private test'},'later');}],
   ['completed central projection changed',f=>{f.raw[2]=raw(2,body(2,'central_status=other'));}],
   ['prepared final-page snapshot',f=>{atomic(f.b.snapshot(BATCH,4),{ticket:'exists'});}],
   ['unexpected old readback mismatch',f=>{atomic(f.b.snapshot(BATCH,0)+'.actual.json',{error:'old mismatch'});}],

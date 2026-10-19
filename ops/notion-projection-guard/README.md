@@ -245,8 +245,10 @@ was subsequently superseded by the existing paired worker's real RELEASE v12.
 The helper requires the exact original five-page plan/error/next=4, all four
 complete durable snapshots and verification receipts, the original approved
 runtime/policy, five fresh ordered complete page reads, the exact reviewed
-Router body/properties/revision and the successor's own release/head. Later
-worker records on earlier pages are saved and never rewritten. Any prepared
+Router body/properties/revision and the successor's own release/head. The complete
+paired worker body and revision are also pinned: retaining an old RELEASE while
+appending a later CLAIM/HOLD or moving its JSON to quoted history rejects closure.
+Later worker records on other completed pages are saved and never rewritten. Any prepared
 final-page evidence, unknown ACK, changed scope or receipt, concurrent Router
 change, absent successor release or production hold rejects the closure.
 
