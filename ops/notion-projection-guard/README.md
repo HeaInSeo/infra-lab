@@ -209,3 +209,26 @@ audit restores only READY on the same plan, after which ordinary fresh prepare,
 authorization and full readback still apply. `--check-only` changes no journal.
 Any other incident, body/worker-property drift or prepared write remains blocked;
 the normal broker verifier admits no timestamp or content normalization.
+
+### Explicit recovery of the 2026-10-19 preflight connection failure
+
+`reconcile_preflight_connection.cjs` is a separately invoked, single-incident
+recovery for `QSYNC-20261019T0245Z-SORI40-LANDED-RWC1-ACCEPTED-NK138-CODEX-RUNNING`.
+That immutable nine-page batch halted with exactly
+`REMOTE_ERROR: McpServerError: Connection failed.` after one verified page and
+before preparing page two. The recovery requires next=1, no pending ticket,
+no pending snapshot/readback, the pinned plan and unchanged approved runtime.
+It validates the first page's complete durable snapshot/receipt and its fresh
+body, properties and revision. All nine fresh ordered reads must be complete;
+each remaining page must still have the unique original literal and no planned
+output inside the exact policy-authorized central section.
+
+The helper emits no Notion request, acknowledges no write and advances no page.
+`--check-only` leaves the journal unchanged. Explicit application saves a private
+full audit, keeps the original plan/error/next/ticket and restores only READY.
+The unchanged approved runner then executes the original batch, starting at
+page two, through ordinary prepare, fresh authorization and exact full readback.
+The already verified first page is never written again. Other errors, identities,
+prepared writes, changed receipts/pages, scope removal and unknown results stay
+blocked. No runtime broker, runner, policy or verifier normalization is added.
+Live pages and receipt copies remain outside the repository.
