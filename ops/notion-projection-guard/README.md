@@ -316,8 +316,9 @@ The broker now rejects incomplete backtick spans in old and new literals. The
 planner also checks each selection against the complete owned central section, rejecting
 an edge inside an existing span. Escaped ticks outside code and literal backslashes
 inside code remain distinct. Delimiter state carries across preceding lines so
-two multiline spans cannot be mispaired on the selected line. This is a conservative editing grammar,
-not a general Markdown normalizer. The exact verifier remains unchanged.
+two multiline spans cannot be mispaired on the selected line. Heading discovery carries the same state from before the section: an apparent
+central heading inside a multiline code span grants no ownership.
+This is a conservative editing grammar, not a general Markdown normalizer. The exact verifier remains unchanged.
 
 The runner validates admission without claiming a journal batch, then preflights
 all remaining complete target pages through that planner before `begin` or any

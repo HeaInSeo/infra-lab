@@ -59,11 +59,14 @@ function pageData(raw, expectedId) {
     revision: page.page_last_edited_at ?? null, raw: clone(raw) };
 }
 function headings(body) {
-  const result = []; let offset = 0, fence = null; const stack = [];
+  const result = []; let offset = 0, fence = null, inline = null; const stack = [];
   const native = 'details|callout|columns|column|tabs|tab|table|synced_block|synced_block_reference|meeting-notes';
   const open = new RegExp('^\\s*<(' + native + ')(?:\\s|>)');
   const close = new RegExp('^\\s*</(' + native + ')>');
   for (const line of body.split('\n')) {
+    // A heading/fence/native tag inside a preceding multiline code span has
+    // no ownership meaning. Carry the same lexer state used by literal plans.
+    if(inline) { inline=scanInline(line,inline).open;offset+=line.length+1;continue; }
     const code = line.match(/^\s*(`{3,}|~{3,})/);
     if (code) {
       if (!fence) fence = { char: code[1][0], size: code[1].length };
@@ -75,6 +78,7 @@ function headings(body) {
       else if (!stack.length) {
         const h = line.match(/^(#{1,4}) (.+)$/);
         if (h) result.push({ text: line, level: h[1].length, start: offset, end: offset + line.length });
+        inline=scanInline(line).open;
       }
     }
     offset += line.length + 1;
@@ -124,9 +128,9 @@ function stableNewText(edit) {
   if (plainMarkup(edit.newStr).includes('->'))
     fail('MARKDOWN_ESCAPE_RISK', 'Use a Unicode arrow or inline code instead of a plain ASCII arrow');
 }
-function inlineSpans(text) {
+function scanInline(text,open=null) {
   // Escapes outside spans are Markdown escapes; inside, backslashes are literal.
-  const spans=[]; let open=null;
+  const spans=[];
   for(let i=0;i<text.length;) {
     if(!open && text[i]==='\\') { i+=2; continue; }
     if(text[i]!=='`') { i++; continue; }
@@ -136,8 +140,12 @@ function inlineSpans(text) {
     else if(size===open.size){spans.push({start:open.start,end});open=null;}
     i=end;
   }
-  if(open)fail('INLINE_CODE_BOUNDARY','Use complete balanced inline-code fields; never cut a field to fit the limit');
-  return spans;
+  return {spans,open};
+}
+function inlineSpans(text) {
+  const parsed=scanInline(text);
+  if(parsed.open)fail('INLINE_CODE_BOUNDARY','Use complete balanced inline-code fields; never cut a field to fit the limit');
+  return parsed.spans;
 }
 function inlineEdit(body,index,edit,start,stop) {
   // Parse from the owned section boundary, not the affected line: a span can

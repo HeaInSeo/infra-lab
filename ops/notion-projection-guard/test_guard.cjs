@@ -634,3 +634,12 @@ test('direct planner rejects a code-span cut when its opener is on a prior line'
   const content=heading+'\nfirst=`prior line\nclosing`; outside; second=`'+oldStr+'\nlast`;\n## HISTORICAL WORKER PROOF\n'+history;
   rejects('INLINE_CODE_BOUNDARY',()=>plan(pageData(page(A,content),A),edit()));
 });
+test('an apparent central section wholly inside a multiline span is never owned',t=>{
+ const content='intro=`starts\n'+heading+'\n'+oldStr+'\n## NEXT\nends`\n';
+ rejects('AMBIGUOUS_SECTION',()=>plan(pageData(page(A,content),A),edit()));
+});
+test('a fake owned heading inside multiline code rejects the whole run before writes',async t=>{
+ const f=runnerFixture(t);f.pages.set(B,page(B,'intro=`starts\n'+heading+'\n'+oldStr+'\n## NEXT\nends`\n'));
+ await assert.rejects(f.runner.run('fake-heading',[edit(),edit(B)]),/AMBIGUOUS_SECTION/);
+ assert.equal(f.writes,0);assert.equal(f.f.b.state.active,null);
+});
