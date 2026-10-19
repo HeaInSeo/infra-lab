@@ -1,5 +1,50 @@
 # Notion projection guard — U0
 
+## Complete NodeKit/Sori observations
+
+`complete_projection.js` is the Code Mode entry point for these observations.
+It requires a fixed manifest: both native central metadata records, the repo
+index, both role queues, Router, hub and dashboard. Sori also requires its two
+already approved native central body sections. A combined observation therefore
+has nine body targets and four metadata targets. Missing or duplicate targets,
+wrong headings or different observation IDs reject before the body runner starts.
+
+Evaluate the file as a function expression and call
+`createCompleteProjection(tools, {createRunner, runnerConfig}).run(bundle)`.
+`createRunner` and `runnerConfig` remain the separately approved pinned runner
+and canonical broker command. The bundle contains `observationId` (ASCII letters,
+digits, underscore and hyphen), `repositories` (`nodekit` and/or `sori`), ordinary
+`edits`, and `native: [{pageId, properties}]`. Each new body literal and each native
+`큐 정리 근거` must contain the identical `observation_id=` field with a backtick
+quoted ID. Native expectations must include 작업 상태, 다음 담당자, 큐 구획,
+차단 대상, 재개 지시 and 큐 정리 근거; only central metadata keys are accepted.
+
+First check the canonical journal and authority, then reconcile native properties
+using the existing minimal property-only preservation procedure. The entry point
+does not write properties, worker proof or policy. It requires their fresh values
+before any body write and verifies all complete bodies/properties after the
+ordinary durable body batch. Only this final readback returns `COMPLETE`.
+`COMPLETED` from a caller-selected broker batch is insufficient. A concurrent own
+event, stale property, unknown read or uncertain write produces no completion
+certificate; preserve existing writes and re-observe rather than rolling back.
+
+This is workflow enforcement when the supervisor uses this entry point, not an
+access-control claim that it cannot invoke a different connector. Adoption must
+be recorded in the actual supervisor prompt and verified on real observations.
+
+## Exact transport pre-prepare closure
+
+`reconcile_transport_preprepare.cjs` handles only the recorded seven-page
+`QSYNC-20261019T132702Z-NK138-LANDED-SORI43-RECIRCULATE` incident. It pins the
+plan/error/ordered scope/runtime and verifies its first full receipt plus seven
+fresh pages. Any later snapshot, pending ticket, changed completed page, already
+written remaining literal, altered evidence or policy rejects closure.
+It defaults to check-only. Explicit `--apply` privately preserves the full journal,
+fresh sources and receipt hashes, marks only this incident `ABORTED_UNWRITTEN`
+and clears its active barrier. Its first write remains verified; the remaining
+six edits are not replayed. No Notion write, ACK, index advance, runtime replacement
+or policy expansion occurs. A new complete observation uses the normal runner.
+
 The hosted central supervisor previously called the Notion connector directly with
 a model-computed selection. On 2026-10-11T23:34Z it reported overwriting about
 4,000 characters across eleven pages. The exact faulty selection code is not

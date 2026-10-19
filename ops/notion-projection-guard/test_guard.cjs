@@ -597,4 +597,6 @@ test('run identity rejection also preserves a reconciled READY plan for the corr
 });
 
 require('./router_stale_prewrite_cases.cjs');
+require('./transport_preprepare_cases.cjs');
+require('./complete_projection_cases.cjs');
 
