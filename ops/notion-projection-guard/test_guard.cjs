@@ -595,3 +595,6 @@ test('run identity rejection also preserves a reconciled READY plan for the corr
   assert.equal(f.f.b.state.batches.observation.status,'READY');assert.equal(f.writes,0);
   assert.equal((await f.newRunner().run('observation',legacy.edits)).status,'COMPLETED');assert.equal(f.writes,5);
 });
+
+require('./router_stale_prewrite_cases.cjs');
+

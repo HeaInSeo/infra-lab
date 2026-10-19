@@ -232,3 +232,33 @@ The already verified first page is never written again. Other errors, identities
 prepared writes, changed receipts/pages, scope removal and unknown results stay
 blocked. No runtime broker, runner, policy or verifier normalization is added.
 Live pages and receipt copies remain outside the repository.
+
+### Explicit closure of the 2026-10-19 stale Router preflight
+
+`reconcile_router_stale_prewrite.cjs` is a separately invoked, one-incident closure,
+not an ordinary broker action or a general HALTED reset. The final Router edit
+in `QSYNC-20261019T082053Z-SORI42-RELEASE-ADMISSION` matched zero old literals:
+the actual central field contained additional retained text. No final-page
+snapshot, ticket or authorization existed. Its proposed REVIEW_REQUESTED state
+was subsequently superseded by the existing paired worker's real RELEASE v12.
+
+The helper requires the exact original five-page plan/error/next=4, all four
+complete durable snapshots and verification receipts, the original approved
+runtime/policy, five fresh ordered complete page reads, the exact reviewed
+Router body/properties/revision and the successor's own release/head. Later
+worker records on earlier pages are saved and never rewritten. Any prepared
+final-page evidence, unknown ACK, changed scope or receipt, concurrent Router
+change, absent successor release or production hold rejects the closure.
+
+Default invocation is check-only. Explicit `--apply` first saves the full original
+journal and fresh reads privately, then records `ABORTED_UNWRITTEN` on that
+original batch and releases its active barrier. The immutable plan/hash,
+next=4, original error, null receipt, other batches and earlier evidence remain
+unchanged. It performs zero Notion writes, acknowledges zero writes and advances
+zero pages; this status is not COMPLETED. Replaying the old plan cannot write.
+A fresh, bounded central observation must use the latest worker/GitHub source
+and the ordinary broker's preflight/write/full-readback/ACK path after closure.
+No runtime broker/runner replacement, policy expansion or new state directory
+is involved. A crash after the private audit but before closure remains blocked
+and requires separate reconciliation; do not delete that audit to retry.
+
