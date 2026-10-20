@@ -1,0 +1,11 @@
+# Private execution state and site-specific exports are never source artifacts.
+/private/
+/runtime/
+/state/
+/snapshots/
+/manual-audits/
+/candidate-*/
+/journal.json
+/approved.sha256
+*.local.json
+.env*

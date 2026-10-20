@@ -24,4 +24,4 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      - run: node --test ops/notion-projection-guard/test_guard.cjs
+      - run: node --test ops/notion-projection-guard/test_guard.cjs ops/notion-projection-guard/test_runtime.cjs

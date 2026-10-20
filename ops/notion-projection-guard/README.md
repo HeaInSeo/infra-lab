@@ -1,5 +1,14 @@
 # Notion projection guard — U0
 
+## Source and installed version
+
+[OPERATIONS.md](OPERATIONS.md) records the public/private storage boundary,
+deployment procedure, reusable supervisor/watch modules and offline version check.
+The recorded installed broker/runner come from full commit
+`01b8a7897bc8709450f536744577313c805c66ca`; see
+[the runtime manifest](deployment/runtime-01b8a789.json). A later documentation or
+verification-tool commit does not change that approved installed source version.
+
 ## Complete NodeKit/Sori observations
 
 `complete_projection.js` is the Code Mode entry point for these observations.
@@ -54,8 +63,9 @@ continued writes, without a durable per-page preservation barrier.
 
 `broker.cjs` now constructs the connector request. `runner.js` calls that request
 through the existing authenticated Notion connector. Neither file contains or
-extracts a Notion token. The broker runs via the existing Desktop Commander →
-`heain@100.92.45.46` route. No Claude wrapper, timer, session, usage policy, or
+extracts a Notion token. The broker uses the existing server-direct Desktop
+Commander device and its fixed approved command. No laptop hop is required.
+No Claude wrapper, timer, session, usage policy, or
 worker-owned proof is changed.
 
 ## Enforced update sequence
@@ -109,8 +119,10 @@ ACKs, clear the journal, or use a new state directory for a production retry.
 The hosted automation API currently exposes prompt/enabled/schedule updates,
 without per-task tool allowlists or routing controls. This integration changes
 the real calling path and enforces checks within it; it cannot revoke the
-automation's raw connector capability. The task remains paused until restoration
-and adoption are verified. Do not describe a prompt rule as capability isolation.
+automation's raw connector capability. Keep a damaged deployment paused until
+restoration and adoption are verified; the current recovery's enabled state is
+recorded separately in private execution evidence. Do not describe a prompt rule
+as capability isolation.
 
 ## Deployment and recovery
 
@@ -122,9 +134,11 @@ are checked before starting the broker. Runtime code is 0555; policy/manifest
 accidental writes, not owner/root tampering. Snapshots stay outside the public
 repository.
 
-`productionEnabled:false` is the installed default. Only the two explicit private
-NON-EXECUTABLE canary pages are writable. The eleven damaged production pages are
-listed separately and stay blocked even if someone enables the hosted task early.
+`productionEnabled:false` is the checked-in default. Only the two explicit private
+NON-EXECUTABLE canary pages are writable under that default. The production pages
+are listed separately and stay blocked under that default even if a hosted task
+is enabled early. The existing approved runtime policy has its own pinned hash
+and private activation record; installing source does not authorize replacing it.
 Keep latest NodeKit worker receipts; a whole-page rollback to before 08:34 KST
 would erase later real worker evidence. Restoration and reconciliation are a
 separate gate, not performed by this guard.

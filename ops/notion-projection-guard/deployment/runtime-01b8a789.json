@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "repository": "HeaInSeo/infra-lab",
+  "sourceCommit": "01b8a7897bc8709450f536744577313c805c66ca",
+  "runtimeSha256": {
+    "broker.cjs": "f426383e21a1e6ad6d00baf34d4aa80374ecbf93062e42bac444def33f7a6f66",
+    "runner.js": "d72764b5befaa3dc12f681bbaafaa8ea3d9db5f3acd17d43ca05fec342cbb01e"
+  },
+  "policySha256": "804709b778ea5fe82eac705654d06f52af8391aa0504d8e0582f3a87022fdf1b",
+  "hostedEntryPoint": {
+    "path": "ops/notion-projection-guard/complete_projection.js",
+    "gitBlob": "cafa2f37d40d7f4cb8d863d11d58a0933aea7b27",
+    "sha256": "708381f542fce20ed872d4ec5401a6c36b9b0c2457c6a33a0e02aa269949ec92"
+  },
+  "recordedInstallationAt": "2026-10-19T23:02:49.009Z",
+  "serverReadbackAt": "2026-10-20T00:07:09.227617Z",
+  "policySource": "existing private approved runtime policy; bytes intentionally excluded",
+  "sourceReview": {
+    "pullRequest": "https://github.com/HeaInSeo/infra-lab/pull/41",
+    "codexCleanComment": "https://github.com/HeaInSeo/infra-lab/pull/41#issuecomment-6279235254",
+    "localTests": 264,
+    "ciChecks": 16
+  }
+}
