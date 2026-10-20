@@ -3,9 +3,9 @@
 코드·시험·운영 문서의 정본은 [HeaInSeo/notion-projection-guard](https://github.com/HeaInSeo/notion-projection-guard)이다.
 이 디렉터리에는 서버 설치 버전과 코드 조회 버전을 연결하는 명세만 남긴다.
 
-- [보정된 고정 source 커밋](https://github.com/HeaInSeo/notion-projection-guard/tree/5b67791a51aa4637571adf5c45989922c91190fd)
+- [보정된 고정 source 커밋](https://github.com/HeaInSeo/notion-projection-guard/tree/356532363319c8d107a9253223ea7127802560fe)
 - [전용 PR #1](https://github.com/HeaInSeo/notion-projection-guard/pull/1): 정상 current-head 검토·CI·병합 게이트 유지
-- [독립 CI](https://github.com/HeaInSeo/notion-projection-guard/actions): Node 22·24의 286개 시험, provenance regression 9개와 원본 35개 이력의 항목별 대조
+- [독립 CI](https://github.com/HeaInSeo/notion-projection-guard/actions): Node 22·24의 286개 시험, provenance regression 13개와 원본 35개 이력의 항목별 대조
 - [설치·조회 연결 명세](deployment/source.json)
 
 최초 이전 `089aea20`의 실행·시험 blob 15개는 불변 import와 같다. 현재 source에는

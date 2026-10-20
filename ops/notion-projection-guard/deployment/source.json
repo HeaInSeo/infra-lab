@@ -2,7 +2,7 @@
   "version": 2,
   "source": {
     "repository": "HeaInSeo/notion-projection-guard",
-    "commit": "5b67791a51aa4637571adf5c45989922c91190fd",
+    "commit": "356532363319c8d107a9253223ea7127802560fe",
     "pullRequest": "https://github.com/HeaInSeo/notion-projection-guard/pull/1",
     "paths": {
       "broker": "broker.cjs",
@@ -39,9 +39,9 @@
     "historyMap": "https://github.com/HeaInSeo/notion-projection-guard/blob/089aea20a24326d71f8c51f38c4e5d7bc7337cb5/history/infra-lab-commit-map.json"
   },
   "verification": {
-    "sourceRef": "5b67791a51aa4637571adf5c45989922c91190fd",
+    "sourceRef": "356532363319c8d107a9253223ea7127802560fe",
     "localTests": 286,
-    "provenanceRegressionTests": 9,
+    "provenanceRegressionTests": 13,
     "nodeVersions": [
       22,
       24
