@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "source": {
+    "repository": "HeaInSeo/notion-projection-guard",
+    "commit": "089aea20a24326d71f8c51f38c4e5d7bc7337cb5",
+    "pullRequest": "https://github.com/HeaInSeo/notion-projection-guard/pull/1",
+    "paths": {
+      "broker": "broker.cjs",
+      "runner": "runner.js",
+      "completeEntry": "complete_projection.js"
+    },
+    "gitBlobs": {
+      "broker": "22f4f7f6c5c6201383d80da3a98e98254d4fe2b5",
+      "runner": "4cb1f4799560b946312b156064b5cede9bb34cd8",
+      "completeEntry": "cafa2f37d40d7f4cb8d863d11d58a0933aea7b27"
+    },
+    "sha256": {
+      "broker.cjs": "f426383e21a1e6ad6d00baf34d4aa80374ecbf93062e42bac444def33f7a6f66",
+      "runner.js": "d72764b5befaa3dc12f681bbaafaa8ea3d9db5f3acd17d43ca05fec342cbb01e",
+      "complete_projection.js": "708381f542fce20ed872d4ec5401a6c36b9b0c2457c6a33a0e02aa269949ec92"
+    }
+  },
+  "installedProvenance": {
+    "repository": "HeaInSeo/infra-lab",
+    "sourceCommit": "01b8a7897bc8709450f536744577313c805c66ca",
+    "manifest": "https://github.com/HeaInSeo/notion-projection-guard/blob/089aea20a24326d71f8c51f38c4e5d7bc7337cb5/deployment/runtime-01b8a789.json",
+    "runtimePolicySha256": "804709b778ea5fe82eac705654d06f52af8391aa0504d8e0582f3a87022fdf1b",
+    "approvedManifestSha256": "9ab049652fb0caee0f00c09de28f0f5c3323391f124708b6726daad0dcf17f01",
+    "reinstallationRequiredForThisSourceMove": false
+  },
+  "migration": {
+    "originalSourceHead": "6ea3729948a9210c557b82094caee44ab3889560",
+    "originalArchiveTag": "archive/npg-before-split-20261020",
+    "importCommit": "890e9d38e4a0a50a6a44232fe378da2f7f7727fa",
+    "preservedCommits": 35,
+    "historyMap": "https://github.com/HeaInSeo/notion-projection-guard/blob/089aea20a24326d71f8c51f38c4e5d7bc7337cb5/history/infra-lab-commit-map.json"
+  },
+  "verification": {
+    "localTests": 271,
+    "nodeVersions": [
+      22,
+      24
+    ],
+    "dedicatedChecks": 4,
+    "dedicatedChecksConclusion": "success",
+    "runtimeExecutableBytesMatchLegacyApproval": true,
+    "sourceConnectorReadback": "verified",
+    "centralAndReadOnlyWatchPromptReadback": "verified",
+    "scheduleAndEnabledState": "preserved",
+    "scheduledAdoption": "requires that scheduled run's own guarded receipts",
+    "importPullRequestState": "draft; unmerged; normal current-head review and landing gates retained"
+  },
+  "preservation": "Keep the existing canonical journal, locks, policy, receipts and private snapshots. This pointer does not authorize raw writes, a replacement state, incident-helper replay or a product merge."
+}
